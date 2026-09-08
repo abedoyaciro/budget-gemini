@@ -1,10 +1,8 @@
 # Análisis Financiero Inteligente — Gemini AI + BudgetBakers Wallet
 
-> **⚠️ WORK IN PROGRESS (WIP)** — Proyecto personal en evolución.
-> El pipeline funcionó de punta a punta con la suscripción activa de
-> BudgetBakers Wallet; actualmente sin suscripción no se puede probar
-> completo. Plan: evolucionar hacia un Cloud Support Lab (Docker +
-> CI/CD + tests automatizados).
+> **⚠️ WORK IN PROGRESS (WIP)** — Proyecto personal en evolución activa.
+> Plan: evolucionar hacia un Cloud Support Lab (Docker + CI/CD + tests
+> automatizados).
 
 Sistema de análisis financiero personal que integra **Google Gemini AI** con la **API REST de BudgetBakers Wallet**. Extrae transacciones, mantiene un histórico de snapshots con detección de cambios, aprende reglas contables automáticamente y genera diagnósticos con **memoria de análisis previos**.
 
