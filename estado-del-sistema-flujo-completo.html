@@ -1,0 +1,480 @@
+
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Estado del Sistema — Budget Gemini</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+  .header { background: linear-gradient(135deg, #4f46e5, #7c3aed); padding: 24px 32px; }
+  .header h1 { font-size: 1.4rem; font-weight: 700; }
+  .header p { color: #c4b5fd; font-size: 0.85rem; margin-top: 4px; }
+  .main { max-width: 1100px; margin: 0 auto; padding: 28px 20px; }
+
+  /* PIPELINE VISUAL */
+  .pipeline { display: flex; align-items: flex-start; gap: 0; overflow-x: auto; padding-bottom: 12px; }
+  .step-wrapper { display: flex; align-items: center; flex-shrink: 0; }
+  .step { width: 130px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .step-circle { width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.3rem; font-weight: 800; border: 3px solid; position: relative; }
+  .step-circle.done     { background: #064e3b; border-color: #10b981; color: #10b981; }
+  .step-circle.current  { background: #1e1b4b; border-color: #6366f1; color: #818cf8; box-shadow: 0 0 0 4px #312e8140; }
+  .step-circle.pending  { background: #1e293b; border-color: #475569; color: #64748b; }
+  .step-label { font-size: 0.7rem; font-weight: 600; text-align: center; line-height: 1.3; color: #94a3b8; max-width: 110px; }
+  .step-label.done    { color: #34d399; }
+  .step-label.current { color: #a5b4fc; }
+  .step-badge { font-size: 0.6rem; padding: 2px 7px; border-radius: 999px; font-weight: 700; margin-top: 2px; }
+  .badge-done    { background: #064e3b; color: #6ee7b7; }
+  .badge-current { background: #312e81; color: #a5b4fc; }
+  .badge-pending { background: #1e293b; color: #475569; }
+  .arrow { width: 28px; display: flex; align-items: center; justify-content: center; color: #334155; font-size: 1.1rem; padding-top: 0; margin-top: -24px; }
+
+  /* SECCIÓN DE ESTADO */
+  .section-title { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; margin-bottom: 14px; margin-top: 32px; padding-bottom: 6px; border-bottom: 1px solid #1e293b; }
+
+  /* CARDS */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+  @media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } .grid3 { grid-template-columns: 1fr; } }
+
+  .card { background: #1e293b; border: 1px solid #334155; border-radius: 14px; padding: 18px; }
+  .card.green  { border-color: #065f46; background: #022c22; }
+  .card.blue   { border-color: #1e3a5f; background: #0c1e35; }
+  .card.purple { border-color: #3730a3; background: #1e1b4b; }
+  .card.amber  { border-color: #92400e; background: #1c0f02; }
+  .card.red    { border-color: #991b1b; background: #1c0505; }
+
+  .card-title { font-size: 0.8rem; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; gap: 7px; }
+  .card-title .icon { font-size: 1rem; }
+  .card p { font-size: 0.78rem; color: #94a3b8; line-height: 1.6; }
+  .card p + p { margin-top: 6px; }
+
+  /* STATUS LIST */
+  .status-list { list-style: none; display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .status-list li { font-size: 0.75rem; display: flex; align-items: flex-start; gap: 8px; line-height: 1.4; }
+  .status-list .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 3px; }
+  .dot-green  { background: #10b981; }
+  .dot-amber  { background: #f59e0b; }
+  .dot-red    { background: #ef4444; }
+  .dot-blue   { background: #6366f1; }
+  .dot-gray   { background: #475569; }
+
+  /* CODE */
+  .code-block { background: #020617; border: 1px solid #1e293b; border-radius: 10px; padding: 14px 16px; font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 0.72rem; line-height: 1.8; overflow-x: auto; margin-top: 10px; }
+  .code-block .comment { color: #475569; }
+  .code-block .cmd     { color: #86efac; font-weight: 600; }
+  .code-block .flag    { color: #93c5fd; }
+  .code-block .output  { color: #fcd34d; }
+  .code-block .section { color: #a78bfa; font-weight: 700; }
+
+  /* TIMELINE */
+  .timeline { display: flex; flex-direction: column; gap: 0; }
+  .tl-item  { display: flex; gap: 14px; }
+  .tl-line  { display: flex; flex-direction: column; align-items: center; }
+  .tl-dot   { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; margin-top: 3px; }
+  .tl-vert  { width: 2px; background: #1e293b; flex: 1; margin: 3px 0; min-height: 16px; }
+  .tl-content { padding-bottom: 16px; flex: 1; }
+  .tl-content h4 { font-size: 0.78rem; font-weight: 700; margin-bottom: 4px; }
+  .tl-content p  { font-size: 0.72rem; color: #64748b; line-height: 1.5; }
+  .tl-content .detail { font-size: 0.7rem; color: #475569; margin-top: 3px; font-style: italic; }
+
+  /* NUMBERS */
+  .stat-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+  .stat { background: #0f172a; border-radius: 8px; padding: 8px 14px; text-align: center; flex: 1; min-width: 70px; }
+  .stat .n  { font-size: 1.3rem; font-weight: 800; }
+  .stat .l  { font-size: 0.65rem; color: #64748b; margin-top: 2px; }
+  .stat .n.green  { color: #10b981; }
+  .stat .n.amber  { color: #f59e0b; }
+  .stat .n.blue   { color: #6366f1; }
+  .stat .n.purple { color: #a78bfa; }
+
+  /* ALERT BOX */
+  .alert { padding: 12px 16px; border-radius: 10px; font-size: 0.78rem; line-height: 1.6; margin-top: 14px; display: flex; gap: 10px; }
+  .alert.info   { background: #0c1e35; border: 1px solid #1e3a5f; color: #93c5fd; }
+  .alert.warn   { background: #1c0f02; border: 1px solid #78350f; color: #fcd34d; }
+  .alert.success{ background: #022c22; border: 1px solid #065f46; color: #6ee7b7; }
+
+  /* COMMAND CARD */
+  .cmd-card { background: #020617; border: 1px solid #1e3a8a; border-radius: 12px; padding: 16px; }
+  .cmd-card h3 { font-size: 0.78rem; font-weight: 700; color: #93c5fd; margin-bottom: 10px; }
+  .cmd-line { display: flex; align-items: flex-start; gap: 10px; padding: 7px 0; border-bottom: 1px solid #0f172a; }
+  .cmd-line:last-child { border-bottom: none; }
+  .cmd-label { font-family: monospace; font-size: 0.72rem; color: #86efac; font-weight: 700; min-width: 180px; flex-shrink: 0; }
+  .cmd-desc { font-size: 0.72rem; color: #64748b; line-height: 1.4; }
+
+  .tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 0.65rem; font-weight: 700; }
+  .tag.done    { background: #064e3b; color: #6ee7b7; }
+  .tag.now     { background: #312e81; color: #a5b4fc; }
+  .tag.pending { background: #1e293b; color: #64748b; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>📊 Budget Gemini — Estado del Sistema y Flujo Completo</h1>
+  <p>Anderson Bedoya Ciro · Última extracción: 2026-06-25 · 128 registros · 90 días</p>
+</div>
+
+<div class="main">
+
+  
+  
+  
+  <div class="section-title">Pipeline Completo — Dónde Estamos</div>
+
+  <div class="pipeline">
+    <div class="step-wrapper">
+      <div class="step">
+        <div class="step-circle done">1</div>
+        <div class="step-label done">Extracción<br />Snapshot</div>
+        <span class="step-badge badge-done">✅ HECHO</span>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="step-wrapper">
+      <div class="step">
+        <div class="step-circle done">2</div>
+        <div class="step-label done">Análisis<br />con Gemini</div>
+        <span class="step-badge badge-done">✅ HECHO</span>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="step-wrapper">
+      <div class="step">
+        <div class="step-circle done">3</div>
+        <div class="step-label done">Aprendizaje<br />de Reglas</div>
+        <span class="step-badge badge-done">✅ HECHO</span>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="step-wrapper">
+      <div class="step">
+        <div class="step-circle done">4</div>
+        <div class="step-label done">Confirmación<br />de Reglas</div>
+        <span class="step-badge badge-done">✅ HECHO</span>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="step-wrapper">
+      <div class="step">
+        <div class="step-circle done">5</div>
+        <div class="step-label done">Enriquecimiento<br />Registros</div>
+        <span class="step-badge badge-done">✅ HECHO</span>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="step-wrapper">
+      <div class="step">
+        <div class="step-circle current">6</div>
+        <div class="step-label current">Nuevo Snapshot<br />post-enriq.</div>
+        <span class="step-badge badge-current">⬅ SIGUIENTE</span>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="step-wrapper">
+      <div class="step">
+        <div class="step-circle pending">7</div>
+        <div class="step-label">Análisis con<br />Memoria</div>
+        <span class="step-badge badge-pending">PENDIENTE</span>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="step-wrapper">
+      <div class="step">
+        <div class="step-circle pending">8</div>
+        <div class="step-label">Dashboard<br />HTML</div>
+        <span class="step-badge badge-pending">PENDIENTE</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="alert warn" style="margin-top:16px">
+    <span>⚠️</span>
+    <div><strong>Tu posición actual:</strong> El enriquecimiento ya aplicó cambios en Wallet (18 parches en 2 sesiones). Para que el análisis siguiente sea preciso, necesitas hacer un nuevo <strong>snapshot</strong> que capture esos cambios, y luego correr el <strong>análisis con memoria</strong> y el <strong>dashboard</strong>.</div>
+  </div>
+
+  
+  
+  
+  <div class="section-title">¿Qué hizo el sistema en cada paso?</div>
+
+  <div class="timeline">
+
+    <div class="tl-item">
+      <div class="tl-line"><div class="tl-dot" style="background:#10b981"></div><div class="tl-vert"></div></div>
+      <div class="tl-content">
+        <h4 style="color:#34d399">Paso 1 — Extracción del Snapshot ✅</h4>
+        <p><strong>Comando:</strong> <code style="color:#86efac">make snapshot</code> (o <code style="color:#86efac">make pipeline</code>)<br />
+        <strong>Qué hace:</strong> Llama a la API REST de BudgetBakers Wallet y descarga:<br />
+        • 10 cuentas con todos los campos (tipo, moneda, balance, estadísticas)<br />
+        • 89 categorías con grupos y cardinalidades<br />
+        • 11 etiquetas con sus metadatos<br />
+        • 128 registros de los últimos 90 días, con categorías y etiquetas embebidas<br />
+        <strong>Guarda:</strong> <code>output/snapshots/snapshot_2026-06-25_16-57-31.json</code> (con envelope de cambios) y actualiza <code>output/snapshot_wallet.json</code></p>
+        <div class="detail">Script: src/gestor_snapshots.py → llama a extractor_wallet.py → paginación automática → detecta cambios vs snapshot anterior</div>
+      </div>
+    </div>
+
+    <div class="tl-item">
+      <div class="tl-line"><div class="tl-dot" style="background:#10b981"></div><div class="tl-vert"></div></div>
+      <div class="tl-content">
+        <h4 style="color:#34d399">Paso 2 — Análisis Financiero con Gemini ✅</h4>
+        <p><strong>Comando:</strong> <code style="color:#86efac">make analyze</code><br />
+        <strong>Qué hace:</strong> Lee el snapshot, carga diagnóstico anterior + reglas confirmadas + cambios detectados y envía todo a Gemini con <code>generate_content</code> usando Structured Outputs (Pydantic). Gemini devuelve un diagnóstico JSON con campos tipados.<br />
+        <strong>Guarda:</strong> <code>output/diagnostico_inteligente.json</code> + <code>output/diagnosticos/diagnostico_TIMESTAMP.json</code></p>
+        <div class="detail">Script: src/analizador_finanzas.py v3.0 → prompt con memoria histórica → DiagnosticoFinanciero Pydantic → guarda con timestamp</div>
+      </div>
+    </div>
+
+    <div class="tl-item">
+      <div class="tl-line"><div class="tl-dot" style="background:#10b981"></div><div class="tl-vert"></div></div>
+      <div class="tl-content">
+        <h4 style="color:#34d399">Paso 3 — Aprendizaje de Reglas Contables ✅</h4>
+        <p><strong>Comando:</strong> <code style="color:#86efac">make learn</code><br />
+        <strong>Qué hace:</strong> Usa la <strong>Interactions API</strong> de Gemini (distinto a generate_content: crea una interacción con ID único y estado en el servidor). Gemini analiza los registros y detecta patrones. Resultado: 6 reglas propuestas.<br />
+        <strong>Guarda:</strong> <code>output/reglas_aprendidas.json</code> (estado: pendiente_confirmacion) + <code>output/historial_interacciones/interaccion_..._analisis.json</code></p>
+        <div class="detail">Script: src/aprendizaje_reglas.py → client.interactions.create() → SCHEMA_REGLAS JSON → 6 reglas detectadas</div>
+      </div>
+    </div>
+
+    <div class="tl-item">
+      <div class="tl-line"><div class="tl-dot" style="background:#10b981"></div><div class="tl-vert"></div></div>
+      <div class="tl-content">
+        <h4 style="color:#34d399">Paso 4 — Confirmación de Reglas ✅</h4>
+        <p><strong>Comando:</strong> <code style="color:#86efac">make confirm</code> (interactivo con TTY)<br />
+        <strong>Qué hace:</strong> Muestra cada regla pendiente. Tú eliges S/N/M. Si eliges M (Modificar), usa <strong>previous_interaction_id</strong> para que Gemini recuerde el contexto de la sesión anterior y ajuste la regla sin repetir todo el prompt. Resultado: 6/6 reglas confirmadas (rule_001 a rule_006), rule_002 modificada para añadir keywords EDS, Terpel + etiqueta Moto.<br />
+        <strong>Guarda:</strong> Actualiza estados en <code>reglas_aprendidas.json</code> + <code>historial_interacciones/confirmacion_*.json</code></p>
+        <div class="detail">Script: src/confirmador_reglas.py → client.interactions.create(previous_interaction_id=...) → fallback local si expiró</div>
+      </div>
+    </div>
+
+    <div class="tl-item">
+      <div class="tl-line"><div class="tl-dot" style="background:#10b981"></div><div class="tl-vert"></div></div>
+      <div class="tl-content">
+        <h4 style="color:#34d399">Paso 5 — Enriquecimiento de Registros ✅</h4>
+        <p><strong>Comando:</strong> <code style="color:#86efac">make enrich</code><br />
+        <strong>Qué hace:</strong> Gemini analiza los registros con nota vacía, sin etiquetas o con "Unknown expense" y propone mejoras. Tú apruebas. El sistema llama a <code>PATCH /records</code> de la API de Wallet en batches de 10. <strong>Esto modifica los datos reales en BudgetBakers.</strong><br /><br />
+        <strong>Resultado de las 2 sesiones ejecutadas:</strong></p>
+        <div class="stat-row">
+          <div class="stat"><div class="n green">18</div><div class="l">Parches aplicados</div></div>
+          <div class="stat"><div class="n amber">1</div><div class="l">Fallido (API)</div></div>
+          <div class="stat"><div class="n blue">1</div><div class="l">Label creado (Mamá)</div></div>
+          <div class="stat"><div class="n purple">8</div><div class="l">Labels obsoletos</div></div>
+        </div>
+        <p style="margin-top:8px"><strong>Cambios aplicados:</strong> 1 registro recategorizado a Groceries, etiquetas "susana" asignadas a 3 registros, etiqueta "mariana" asignada a 8 registros, etiqueta "Mama" nueva creada y asignada.</p>
+        <div class="detail">Script: src/asistente_enriquecimiento.py → Interactions API → _patch_records() → PATCH /records en batches de 10</div>
+      </div>
+    </div>
+
+    <div class="tl-item">
+      <div class="tl-line"><div class="tl-dot" style="background:#6366f1"></div><div class="tl-vert"></div></div>
+      <div class="tl-content">
+        <h4 style="color:#a5b4fc">Paso 6 — Nuevo Snapshot post-enriquecimiento ⬅ SIGUIENTE</h4>
+        <p><strong>Por qué es necesario:</strong> El enriquecimiento modificó registros directamente en Wallet (etiquetas, categorías). El snapshot actual <em>no refleja esos cambios</em>. Un nuevo snapshot capturará los registros ya enriquecidos para que el análisis sea preciso.<br /><br />
+        El gestor de snapshots comparará automáticamente y reportará: 0 nuevos registros, ~18 registros modificados (los que recibieron parches).</p>
+        <div class="detail">Script: src/gestor_snapshots.py → API Wallet → detecta modificados → guarda nuevo snapshot_TIMESTAMP.json</div>
+      </div>
+    </div>
+
+    <div class="tl-item">
+      <div class="tl-line"><div class="tl-dot" style="background:#475569"></div><div class="tl-vert"></div></div>
+      <div class="tl-content">
+        <h4 style="color:#94a3b8">Paso 7 — Análisis con Memoria PENDIENTE</h4>
+        <p><strong>Qué hará:</strong> El analizador v3.0 leerá el nuevo snapshot + el diagnóstico anterior (ya guardado en <code>diagnostico_latest.json</code>) + las 6 reglas confirmadas. Gemini generará un diagnóstico que incluye:<br />
+        • Comparación vs período anterior (cambios_vs_periodo_anterior)<br />
+        • Lista de reglas aplicadas (rule_001 a rule_006)<br />
+        • Nuevos patrones detectados<br />
+        • Proyección del próximo mes</p>
+      </div>
+    </div>
+
+    <div class="tl-item">
+      <div class="tl-line"><div class="tl-dot" style="background:#475569"></div><div class="tl-vert" style="min-height:8px"></div></div>
+      <div class="tl-content">
+        <h4 style="color:#94a3b8">Paso 8 — Dashboard HTML PENDIENTE</h4>
+        <p><strong>Qué hará:</strong> Lee snapshot + diagnóstico + reglas + enriquecimiento y genera <code>output/dashboard.html</code> con 8 secciones, Chart.js y la nueva sección de Memoria IA con cambios comparativos.</p>
+      </div>
+    </div>
+
+  </div>
+
+  
+  
+  
+  <div class="section-title">Comandos para Ejecutar Ahora</div>
+
+  <div class="grid2">
+    <div>
+      <div class="card blue">
+        <div class="card-title"><span class="icon">🎯</span> Opción A — Pasos individuales (recomendado)</div>
+        <p>Ejecuta paso a paso para ver el output de cada uno:</p>
+        <div class="code-block">
+<span class="comment"># 1. Nuevo snapshot (captura cambios del enriquecimiento)</span>
+<span class="cmd">make snapshot</span>
+
+<span class="comment"># Verás algo como:</span>
+<span class="output">  📊 Cambios detectados → 0 nuevos, ~18 modificados</span>
+
+<span class="comment"># 2. Análisis con memoria histórica</span>
+<span class="cmd">make analyze</span>
+
+<span class="comment"># Verás la sección de memoria:</span>
+<span class="output">  🧠 Memoria: diagnóstico=sí, reglas=6, cambios=sí</span>
+<span class="output">  📈 CAMBIOS VS PERÍODO ANTERIOR:</span>
+<span class="output">  📐 REGLAS APLICADAS: rule_001, rule_002...</span>
+
+<span class="comment"># 3. Generar dashboard actualizado</span>
+<span class="cmd">make dashboard</span>
+
+<span class="comment"># Abre output/dashboard.html en tu navegador</span>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card purple">
+        <div class="card-title"><span class="icon">⚡</span> Opción B — Pipeline de una sola vez</div>
+        <p>Ejecuta los 3 pasos en secuencia automáticamente:</p>
+        <div class="code-block">
+<span class="comment"># Pipeline estándar: snapshot + analyze + dashboard</span>
+<span class="cmd">make pipeline</span>
+
+<span class="comment"># Con ventana de 30 días en vez de 90:</span>
+<span class="cmd">make pipeline <span class="flag">DAYS=30</span></span>
+
+<span class="comment"># Si quieres también aprender nuevas reglas:</span>
+<span class="cmd">make full</span>
+<span class="comment"># = snapshot + analyze + learn + enrich + dashboard</span>
+
+<span class="comment"># Log completo en:</span>
+<span class="output">  output/logs/pipeline_TIMESTAMP.log</span>
+<span class="output">  output/logs/pipeline_TIMESTAMP_resumen.json</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  
+  
+  
+  <div class="section-title">¿Qué pasa dentro del sistema en cada comando?</div>
+
+  <div class="grid3">
+
+    <div class="card">
+      <div class="card-title"><span class="icon">📸</span> <span style="color:#93c5fd">make snapshot</span></div>
+      <ul class="status-list">
+        <li><span class="dot dot-blue"></span>Docker arranca contenedor con <code>.env</code> montado</li>
+        <li><span class="dot dot-blue"></span>Ejecuta <code>src/gestor_snapshots.py</code></li>
+        <li><span class="dot dot-blue"></span>GET <code>/accounts</code> → 10 cuentas con todos los campos</li>
+        <li><span class="dot dot-blue"></span>GET <code>/categories</code> → 89 categorías paginadas</li>
+        <li><span class="dot dot-blue"></span>GET <code>/labels</code> → etiquetas con metadatos</li>
+        <li><span class="dot dot-blue"></span>GET <code>/records?recordDate=gte.X</code> → registros últimos 90 días</li>
+        <li><span class="dot dot-blue"></span>Transforma cada entidad al schema normalizado</li>
+        <li><span class="dot dot-blue"></span>Detecta cambios vs snapshot anterior (por ID + updatedAt)</li>
+        <li><span class="dot dot-green"></span>Guarda <code>snapshots/snapshot_TIMESTAMP.json</code></li>
+        <li><span class="dot dot-green"></span>Actualiza <code>snapshot_wallet.json</code></li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="icon">🧠</span> <span style="color:#93c5fd">make analyze</span></div>
+      <ul class="status-list">
+        <li><span class="dot dot-purple"></span>Lee <code>snapshot_wallet.json</code></li>
+        <li><span class="dot dot-purple"></span>Lee <code>diagnosticos/diagnostico_latest.json</code> (memoria)</li>
+        <li><span class="dot dot-purple"></span>Lee <code>reglas_aprendidas.json</code> → filtra confirmadas</li>
+        <li><span class="dot dot-purple"></span>Lee cambios detectados del último snapshot</li>
+        <li><span class="dot dot-purple"></span>Construye prompt con bloque histórico + bloque reglas</li>
+        <li><span class="dot dot-purple"></span>Llama a <code>genai.Client().models.generate_content()</code></li>
+        <li><span class="dot dot-purple"></span>Gemini devuelve JSON validado contra schema Pydantic</li>
+        <li><span class="dot dot-green"></span>Guarda <code>diagnosticos/diagnostico_TIMESTAMP.json</code></li>
+        <li><span class="dot dot-green"></span>Actualiza <code>diagnostico_latest.json</code></li>
+        <li><span class="dot dot-green"></span>Actualiza <code>diagnostico_inteligente.json</code></li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="icon">📊</span> <span style="color:#93c5fd">make dashboard</span></div>
+      <ul class="status-list">
+        <li><span class="dot dot-amber"></span>Lee todos los JSONs de <code>output/</code></li>
+        <li><span class="dot dot-amber"></span>Calcula estadísticas: cat_gastos, evolución mensual, tipo_pago</li>
+        <li><span class="dot dot-amber"></span>Genera HTML con datos JS inline (no necesita servidor)</li>
+        <li><span class="dot dot-amber"></span>Sección nueva: Memoria IA con cambios vs período anterior</li>
+        <li><span class="dot dot-amber"></span>Sección: Proyección próximo mes</li>
+        <li><span class="dot dot-amber"></span>Sección: Reglas aplicadas en este análisis</li>
+        <li><span class="dot dot-amber"></span>Sección: Nuevos patrones sugeridos</li>
+        <li><span class="dot dot-amber"></span>Gráficos Chart.js: bar (evolución), doughnut (categorías), bar horizontal (pagos)</li>
+        <li><span class="dot dot-green"></span>Guarda <code>output/dashboard.html</code></li>
+      </ul>
+    </div>
+
+  </div>
+
+  
+  
+  
+  <div class="section-title">Estado Actual de los Archivos de Output</div>
+
+  <div class="grid2">
+    <div class="card green">
+      <div class="card-title"><span class="icon">✅</span> Archivos actualizados y listos</div>
+      <ul class="status-list">
+        <li><span class="dot dot-green"></span><code>output/snapshot_wallet.json</code> — snapshot 2026-06-25 16:57</li>
+        <li><span class="dot dot-green"></span><code>output/snapshots/snapshot_2026-06-25_16-57-31.json</code></li>
+        <li><span class="dot dot-green"></span><code>output/diagnostico_inteligente.json</code> — diagnóstico v2.0</li>
+        <li><span class="dot dot-green"></span><code>output/diagnosticos/diagnostico_latest.json</code> — inicializado ✅</li>
+        <li><span class="dot dot-green"></span><code>output/reglas_aprendidas.json</code> — 6 reglas confirmadas</li>
+        <li><span class="dot dot-green"></span><code>output/enriquecimiento_log.json</code> — 2 sesiones, 18 parches</li>
+        <li><span class="dot dot-green"></span><code>src/analizador_finanzas.py</code> — v3.0 con memoria</li>
+        <li><span class="dot dot-green"></span><code>src/generar_dashboard.py</code> — v2.0 con sección Memoria IA</li>
+      </ul>
+    </div>
+    <div class="card amber">
+      <div class="card-title"><span class="icon">⏳</span> Necesitan ser regenerados</div>
+      <ul class="status-list">
+        <li><span class="dot dot-amber"></span><code>output/snapshot_wallet.json</code> — desactualizado post-enriquecimiento. Los 18 registros modificados en Wallet no están reflejados aquí todavía.</li>
+        <li><span class="dot dot-amber"></span><code>output/diagnostico_inteligente.json</code> — generado con analizador v2.0 (sin memoria). Necesita regenerarse con v3.0 para tener los campos de memoria.</li>
+        <li><span class="dot dot-amber"></span><code>output/dashboard.html</code> — generado antes de los cambios de hoy. Necesita <code>make dashboard</code> para incluir la sección Memoria IA.</li>
+      </ul>
+    </div>
+  </div>
+
+  
+  
+  
+  <div class="section-title">Cómo usa el sistema las dos APIs de Gemini</div>
+
+  <div class="grid2">
+    <div class="card">
+      <div class="card-title"><span class="icon">⚡</span> generate_content (Analizador)</div>
+      <p><strong>Usado en:</strong> <code>make analyze</code></p>
+      <p style="margin-top:8px">Llamada <em>stateless</em>: envías todo el contexto en un solo prompt y Gemini responde. No hay sesión ni ID de interacción. Ideal para diagnósticos donde el prompt ya contiene todo lo necesario (snapshot + memoria cargada en Python).</p>
+      <p style="margin-top:8px">Usa <strong>Structured Outputs con Pydantic</strong>: Gemini garantiza que la respuesta sea JSON válido que cumple el schema de <code>DiagnosticoFinanciero</code>.</p>
+    </div>
+    <div class="card">
+      <div class="card-title"><span class="icon">🔄</span> Interactions API (Aprendizaje + Confirmador)</div>
+      <p><strong>Usado en:</strong> <code>make learn</code> y <code>make confirm</code></p>
+      <p style="margin-top:8px">Llamada <em>stateful</em>: Gemini guarda la sesión en su servidor con un <code>interaction_id</code>. Cuando el usuario pide modificar una regla (opción M), el confirmador llama con <code>previous_interaction_id</code> y Gemini <em>recuerda todo el análisis anterior</em> sin tener que reenviar los 128 registros.</p>
+      <p style="margin-top:8px"><strong>Fallback automático:</strong> si la interacción expiró en el servidor (Free Tier: 1 día), el sistema reconstruye el contexto desde el historial local guardado en <code>output/historial_interacciones/</code>.</p>
+    </div>
+  </div>
+
+  
+  <div class="alert success" style="margin-top:24px">
+    <span>🚀</span>
+    <div>
+      <strong>Resumen de lo que harás ahora:</strong><br />
+      1. <code>make snapshot</code> — captura el estado actual de Wallet con los 18 registros ya enriquecidos<br />
+      2. <code>make analyze</code> — genera diagnóstico v3.0 con memoria (verás cambios vs período anterior + reglas aplicadas)<br />
+      3. <code>make dashboard</code> — genera el HTML con todas las secciones nuevas<br /><br />
+      O en un solo comando: <strong><code>make pipeline</code></strong>
+    </div>
+  </div>
+
+  <div style="text-align:center;margin-top:28px;font-size:0.7rem;color:#334155">
+    Budget-Gemini System · Anderson Bedoya Ciro
+  </div>
+
+</div>
+</body>
+</html>

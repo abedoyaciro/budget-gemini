@@ -1,0 +1,35 @@
+# Variables de entorno (se pasan con --env-file)
+.env
+
+# Control de versiones
+.git
+.gitignore
+
+# Documentación (no necesaria en el contenedor)
+*.md
+!README.md
+
+# Archivos de respaldo o temporales
+prueba_gemini copy.py
+*.bak
+*.tmp
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Archivos de salida (se generan en el contenedor)
+snapshot_wallet.json
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
