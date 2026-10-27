@@ -1,0 +1,28 @@
+# Hermes — MCP de Wallet (fragmento de configuración)
+#
+# Pega este bloque bajo la clave `mcp_servers:` de tu configuración activa:
+#   %LOCALAPPDATA%\hermes\config.yaml   (Windows)
+#   ~/AppData/Local/hermes/config.yaml  (referencia del propio Hermes)
+#
+# El MCP de Wallet usa OAuth 2.0 + PKCE. Hermes NO puede completar el flujo en
+# modo no interactivo: agrega el servidor y luego corre, en una terminal
+# interactiva:
+#
+#   hermes mcp login wallet
+#
+# Verifica la conexión con:
+#
+#   hermes mcp test wallet
+#   hermes mcp list
+#
+# Nota: `auth: oauth` es la clave que activa OAuth 2.1 con PKCE en Hermes.
+# `enabled: true` lo deja disponible; si aún no iniciaste sesión, el primer
+# intento de conexión fallará y Hermes lo reportará. Completa el login y repite.
+
+mcp_servers:
+  wallet:
+    url: https://mcp.wallet.budgetbakers.com
+    auth: oauth
+    connect_timeout: 10.0
+    keepalive_interval: 120
+    enabled: true
