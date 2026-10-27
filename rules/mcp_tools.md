@@ -65,6 +65,10 @@
    `patch_records` con `$clear: ["transfer"]`.
 6. **`amount` es número**, no string. `recordDate` ISO 8601. `accountId` UUID.
 7. **`bankAccountNumber` no se reenvía enmascarado** (`****1234`) al crear o parchear.
+8. **Suma verificada:** `get_records_aggregation` puede devolver solo `count` si
+   no aplica `expressions`. Si `results[]` no trae la suma, cae a `get_records`
+   con `limit` acotado y suma localmente (procedimiento P6 de la skill). Nunca
+   publiques un total sin suma verificada.
 
 ## Rate limit y uso razonable
 

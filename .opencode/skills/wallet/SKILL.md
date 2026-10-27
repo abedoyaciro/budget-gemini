@@ -106,10 +106,12 @@ Lee la plantilla correspondiente en `rules/informes.md`.
 - **Rendimiento** → TEA mensual =
   `(1 + interés_mes / saldo_promedio_mes)^12 − 1`, solo con saldo promedio
   > 10.000 COP. Meses con saldo ≈ 0: **no concluyente**.
-- Sin tool de agregación adecuada: trae el período con `limit` acotado y agrega
-  tú, indicando cuántos registros usaste.
+- Si la agregación no devuelve la suma o no hay tool adecuada: aplica **P6**
+  (trae el período con `limit` acotado y suma localmente, indicando cuántos
+  registros usaste).
 
-Nunca vuelques JSON crudo. Tabla + 2-3 frases de lectura.
+Nunca publiques un total sin suma verificada. Nunca vuelques JSON crudo.
+Tabla + 2-3 frases de lectura.
 
 ## P4 — Conciliar contra captura del banco
 
@@ -151,7 +153,34 @@ Muestra el delta al usuario y pide **doble confirmación** antes de ejecutarlo s
 `-DryRun`. El script exige explicación ≥10 caracteres y valida el delta; sin
 aprobación humana no aplica nada.
 
-## P6 — Corregir un movimiento
+## P6 — Sumar montos (agregación)
+
+Entrada típica: *"¿Cuánto gasté este mes?"*, *"Total por categoría en octubre"*,
+*"Suma de ingresos por cuenta este año"*.
+
+1. **Primera opción: `get_records_aggregation`** (una llamada).
+   - `groupBy`: `month`, `category:name`, `account:name`, `label:name` o una
+     combinación de ellos.
+   - `recordDate`: `["gte.YYYY-MM-01", "lt.YYYY-MM+1-01"]`.
+   - `limit`: 200 por defecto; 1000 máximo.
+   - `expressions`: pide la suma de forma explícita (`amount:sum` y, si comparas
+     magnitudes, `amount:absSum`).
+2. **Verifica que la suma llegó.** El servidor puede devolver solo `count` si no
+   aplicó la expresión. Si `results[]` no trae un campo de suma, **no inventes el
+   total**: cae al paso 3.
+3. **Fallback determinista:** `get_records` con `limit` ≤ 400 por página y suma
+   localmente. Indica cuántos registros sumaste y el rango de fechas. Acota por
+   fecha, cuenta, categoría o etiqueta; no traigas el histórico completo. También
+   puedes ejecutar `.\scripts\budget.ps1 agregar -Desde ... -Hasta ... -Por ...`
+   (suma por REST, reproducible).
+4. **Nunca mezcles monedas ni signos.** Suma por moneda y por `recordType`
+   (ingreso/gasto). Un neto COP no se suma con un saldo USD.
+5. **Formato:** tabla con Categoría | Ingresos | Gastos | Neto | % del gasto.
+   Números es-CO. Sin JSON crudo.
+6. Si el total no cuadra con los movimientos vistos, **no ajustes nada**:
+   reporta la diferencia y pide la captura del banco (P4).
+
+## P7 — Corregir un movimiento
 
 1. Localízalo con `get_records` (cuenta + ventana + texto).
 2. Muestra `antes → después` campo por campo.
@@ -175,4 +204,5 @@ Tabla completa en `rules/mcp_tools.md`. Lo esencial:
 - Arranque: 1 llamada (`get_client_profile`).
 - Lectura de KB: solo el archivo necesario.
 - Por registro: 3-4 llamadas. Por informe: 1-3. Por conciliación: el script.
+- Por suma: 1 agregación o 1-2 páginas de `get_records`.
 - Nada de bucles de sondeo ni volcados largos.

@@ -52,7 +52,9 @@ Si algo no está en ninguna de las tres: **no lo sabes**. Pregunta.
 13. **Sync hasta 15 min.** Tras escribir, una relectura. Si no aparece, informa;
     no insistas.
 14. **Agrega antes de traer.** Una agregación vale más que 200 registros.
-    Tope 50 registros por consulta salvo petición explícita.
+    Tope 50 registros por consulta salvo petición explícita. Si la agregación no
+    devuelve la suma, suma localmente y di cuántos registros usaste: nunca
+    publiques un total sin suma verificada.
 15. **Formato:** números es-CO (`2.580.398,47`), fechas `YYYY-MM-DD`, tablas en
     vez de JSON crudo.
 
@@ -70,16 +72,18 @@ Procedimiento completo: skill `wallet`.
 ## Estructura
 
 ```
+.opencode/  skill canónica (OpenCode)
+.hermes/    copia generada de la skill + ejemplo de config MCP
 rules/      Knowledge Base (hechos + tus convenciones)
-tools/      escape hatch determinista (REST, conciliación, ajuste, bootstrap)
+tools/      escape hatch determinista (REST, conciliación, ajuste, bootstrap, suma)
 plans/      planes de conciliación v1
 schemas/    contrato plan.conciliacion.v1
-tests/      suite del cliente y del plan
+tests/      suite del cliente, del plan y de sincronización de skills
 ```
 
 `tools/` existe para lo que el MCP no cubre bien: verificación con lag de sync,
-conciliación determinista e informes reproducibles. No lo uses para lo que el
-MCP ya hace.
+conciliación determinista, informes reproducibles y sumas locales cuando la
+agregación no devuelve el total. No lo uses para lo que el MCP ya hace.
 
 ## Nunca
 

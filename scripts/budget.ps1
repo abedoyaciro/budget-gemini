@@ -25,7 +25,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('help', 'doctor', 'backup', 'bootstrap', 'reconcile', 'ajustar', 'test')]
+    [ValidateSet('help', 'doctor', 'backup', 'bootstrap', 'reconcile', 'ajustar', 'agregar', 'sync-skills', 'test')]
     [string]$Command,
 
     [int]$Days = 0,
@@ -35,6 +35,14 @@ param(
     [string]$Delta,
     [string]$Explicacion,
     [string]$Out,
+    [string]$Desde,
+    [string]$Hasta,
+    [ValidateSet('categoria', 'mes', 'cuenta', 'etiqueta')]
+    [string]$Por = 'categoria',
+    [string]$Moneda,
+    [ValidateSet('md', 'json')]
+    [string]$Formato = 'md',
+    [int]$Limite,
     [switch]$DryRun,
     [switch]$Yes
 )
@@ -70,7 +78,7 @@ function Invoke-Step {
     }
 }
 
-if ($Command -notin @('help', 'doctor', 'test')) {
+if ($Command -notin @('help', 'doctor', 'test', 'sync-skills')) {
     if (-not (Test-Path (Join-Path $Root '.env'))) {
         Write-Error 'Falta .env con WALLET_API_TOKEN (copia .env.example a .env).'
         exit 1
@@ -89,6 +97,10 @@ Wallet + Knowledge Base -- runner nativo (Windows, sin Docker)
                                              Concilia una cuenta contra una captura
   budget.ps1 ajustar -Cuenta X -InitialBalance N -Delta N -Explicacion "..." [-DryRun]
                                              Ajuste de partida de apertura
+  budget.ps1 agregar -Desde YYYY-MM-DD [-Hasta ...] [-Por categoria|mes|cuenta|etiqueta]
+                      [-Moneda COP] [-Formato md|json] [-Limite N]
+                                             Suma determinista de movimientos (P6)
+  budget.ps1 sync-skills                     Copia la skill de OpenCode a Hermes
   budget.ps1 test                            Suite de tests
 
 Notas:
@@ -106,6 +118,14 @@ dentro del agente, no por este script.
         & $Python '--version'
         Write-Host (".env            : " + $(if (Test-Path (Join-Path $Root '.env')) { 'presente' } else { 'FALTA' }))
         Write-Host (".opencode/      : " + $(if (Test-Path (Join-Path $Root '.opencode')) { 'presente' } else { 'FALTA' }))
+        Write-Host (".hermes/skill   : " + $(if (Test-Path (Join-Path $Root '.hermes\skills\wallet\SKILL.md')) { 'ok' } else { 'FALTA (corre sync-skills)' }))
+        $hermesCfg = Join-Path $env:LOCALAPPDATA 'hermes\config.yaml'
+        if (Test-Path $hermesCfg) {
+            $walletEnHermes = Select-String -Path $hermesCfg -Pattern '^\s*wallet:' -Quiet
+            Write-Host ("Hermes MCP      : " + $(if ($walletEnHermes) { 'wallet configurado' } else { 'wallet no configurado' }))
+        } else {
+            Write-Host 'Hermes MCP      : config no encontrada'
+        }
         $mcp = Join-Path $Root 'opencode.json'
         if (Test-Path $mcp) {
             $cfg = Get-Content $mcp -Raw | ConvertFrom-Json
@@ -146,6 +166,21 @@ dentro del agente, no por este script.
         if ($Explicacion) { $a += @('--explicacion', $Explicacion) }
         if ($DryRun) { $a += '--dry-run' }
         Invoke-Step 'ajustar_saldo_cuenta' $a
+    }
+    'agregar' {
+        if (-not $Desde) {
+            Write-Error 'Uso: budget.ps1 agregar -Desde YYYY-MM-DD [-Hasta ...] [-Por categoria|mes|cuenta|etiqueta]'
+            exit 1
+        }
+        $a = @('--desde', $Desde, '--por', $Por, '--formato', $Formato)
+        if ($Hasta) { $a += @('--hasta', $Hasta) }
+        if ($Cuenta) { $a += @('--cuenta', $Cuenta) }
+        if ($Moneda) { $a += @('--moneda', $Moneda) }
+        if ($Limite) { $a += @('--limite', "$Limite") }
+        Invoke-Step 'agregar_periodo' $a
+    }
+    'sync-skills' {
+        Invoke-Step 'sync_skills' @()
     }
     'test' {
         & $Python '-m' 'pytest' 'tests' '-q'

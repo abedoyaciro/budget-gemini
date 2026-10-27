@@ -59,6 +59,8 @@ Los nombres reales de los tools están en `mcp_tools.md`. Aquí solo la intenci�
 - Tope por consulta: 50 registros salvo que el humano pida más.
 - No volcar JSON crudo al chat: tablas.
 - No sumar monedas distintas: reportar por moneda.
+- Un total sin suma verificada no se publica: si la agregación no devuelve la
+  suma, cae a `get_records` y suma localmente (P6 de la skill).
 <!-- HECHOS:END -->
 
 <!-- CONVENCIONES:START -->

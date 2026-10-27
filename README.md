@@ -46,6 +46,16 @@ opencode mcp add wallet --url https://mcp.wallet.budgetbakers.com
 Luego, en la interfaz: `/mcps` → `wallet` → **sign in** (OAuth con email y
 código de 6 dígitos).
 
+### Hermes
+
+```powershell
+hermes mcp add wallet --url https://mcp.wallet.budgetbakers.com --auth oauth
+hermes mcp login wallet          # interactivo: email + código
+hermes skills trust .            # carga .hermes/skills/wallet
+```
+
+Guía completa: [`docs/hermes-setup.md`](docs/hermes-setup.md).
+
 Permisos se gobiernan en `web.budgetbakers.com/settings/mcp-server`
 (por defecto solo lectura). Habilita `records.create`, `records.update` y
 `records.delete`. Se verifican con `get_client_profile` → `grantedScopes`.
@@ -67,6 +77,8 @@ Inventario completo de tools, límites de lote y tabla de errores:
 .\scripts\budget.ps1 doctor        # entorno, MCP y KB
 .\scripts\budget.ps1 backup        # respaldo completo a output/
 .\scripts\budget.ps1 bootstrap     # (re)genera rules/*.md
+.\scripts\budget.ps1 agregar -Desde 2026-10-01 -Por categoria
+.\scripts\budget.ps1 sync-skills   # copia la skill a .hermes/
 .\scripts\budget.ps1 reconcile -Plan plans\plan_pibank.json -DryRun
 .\scripts\budget.ps1 ajustar -Cuenta Pibank -InitialBalance 2.580.398,47 -Delta 2.580.400,24 -Explicacion "Residual de apertura"
 .\scripts\budget.ps1 test
@@ -78,7 +90,12 @@ Sin PowerShell: `make <target>` o `python tools/<script>.py` (con `PYTHONPATH=to
 
 ```
 AGENTS.md              Identidad y reglas del agente
-opencode.json          MCP de Wallet
+opencode.json          MCP de Wallet (OpenCode)
+.opencode/
+  skills/wallet/SKILL.md  Skill canónica (fuente única)
+.hermes/
+  config.example.yaml   Fragmento MCP para Hermes
+  skills/wallet/SKILL.md  Copia generada de la skill (no editar a mano)
 rules/
   cuentas.md           Cuentas, moneda, sync, saldo (hechos) + tu rol (convenciones)
   categorias.md        systemId + consistencia de términos de nota
@@ -92,11 +109,14 @@ tools/
   plan_conciliacion.py Esquema v1 + parsing es-CO + matching
   conciliar_cuenta.py  Conciliación contra capturas
   ajustar_saldo_cuenta.py  Partida de apertura (initialBalance)
+  agregar_periodo.py   Suma determinista por grupo (fallback de P6)
+  sync_skills.py       Sincroniza la skill canónica a .hermes/
 plans/                 Planes de conciliación
 schemas/               plan.conciliacion.v1.json
-tests/                 54 tests
+tests/                 Suite del cliente, plan y sincronización de skills
 scripts/budget.ps1     Runner nativo (Windows)
 docs/commands.md       Comandos y problemas frecuentes
+docs/hermes-setup.md   Guía de Hermes equivalente a OpenCode
 docs/historico/        Documentos del sistema anterior (ideas rescatadas)
 ```
 

@@ -14,6 +14,8 @@ Wallet dentro del agente**. Este documento cubre las herramientas deterministas.
 | `budget.ps1 doctor` | Comprueba Python, `.env`, `opencode.json` y `rules/` |
 | `budget.ps1 backup [-Out ruta.json]` | Respaldo completo (cuentas, categorías, etiquetas, registros) |
 | `budget.ps1 bootstrap [-Days 0] [-DryRun]` | (Re)genera `rules/*.md` |
+| `budget.ps1 agregar -Desde YYYY-MM-DD [-Hasta ...] [-Por ...]` | Suma determinista por grupo (P6) |
+| `budget.ps1 sync-skills` | Copia la skill canónica a `.hermes/` |
 | `budget.ps1 reconcile -Plan p.json [-DryRun] [-Yes]` | Concilia una cuenta |
 | `budget.ps1 ajustar -Cuenta X -InitialBalance N -Delta N -Explicacion "..." [-DryRun]` | Ajuste de partida de apertura |
 | `budget.ps1 test` | Suite de tests |
@@ -28,6 +30,8 @@ termina con exit code 1.
 make doctor
 make backup
 make bootstrap DAYS=0
+make agregar DESDE=2026-10-01 POR=categoria
+make sync-skills
 make reconcile PLAN=plans/x.json DRY=1
 make ajustar CUENTA=Pibank INITIAL=2.580.398,47 DELTA=2.580.400,24 \
              EXPLICACION="Residual de apertura" DRY=1
@@ -43,6 +47,8 @@ python tools/backup_wallet.py
 python tools/conciliar_cuenta.py --plan plans\plan_pibank.json --dry-run
 python tools/ajustar_saldo_cuenta.py --cuenta Pibank --initial-balance 2.580.398,47 `
     --delta 2.580.400,24 --explicacion "Residual de apertura" --dry-run
+python tools/agregar_periodo.py --desde 2026-10-01 --por categoria
+python tools/sync_skills.py
 ```
 
 ## Docker (opcional)
@@ -55,6 +61,8 @@ docker compose run --rm wallet-tools python tools/conciliar_cuenta.py --plan pla
 
 ## MCP de Wallet
 
+### OpenCode
+
 ```powershell
 opencode mcp add wallet --url https://mcp.wallet.budgetbakers.com
 opencode mcp list
@@ -62,6 +70,26 @@ opencode mcp list
 
 Si aparece `needs authentication`: en la interfaz, `/mcps` → `wallet` → sign in.
 Los permisos (scopes) se activan en `web.budgetbakers.com/settings/mcp-server`.
+
+### Hermes
+
+```powershell
+hermes mcp add wallet --url https://mcp.wallet.budgetbakers.com --auth oauth
+hermes mcp login wallet          # interactivo: email + código
+hermes mcp test wallet
+hermes skills trust .
+hermes skills list
+```
+
+En modo no interactivo, `hermes mcp add` guarda el servidor como disabled porque
+no puede completar OAuth. Es esperado: completa `hermes mcp login wallet` en una
+terminal normal. Guía completa: [`docs/hermes-setup.md`](hermes-setup.md).
+
+Sincroniza la skill después de editarla:
+
+```powershell
+.\scripts\budget.ps1 sync-skills
+```
 
 ## Problemas frecuentes
 
