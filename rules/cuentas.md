@@ -29,14 +29,20 @@ Qué cuentas existen, en qué moneda y cuánto tienen. Generado desde Wallet.
 <!-- CONVENCIONES:START -->
 ## Mis convenciones
 
-Completa el rol de cada cuenta. El agente lo usa para decidir dónde registrar
-un movimiento cuando no dices la cuenta.
+**Yo nombro la cuenta explícitamente.** El agente no debe adivinar por el
+contexto ni por el historial. Si en el mensaje no aparece una cuenta que exista
+en la tabla de hechos, el agente pregunta y no registra nada.
 
 | Cuenta | Rol (para qué la uso) | ¿Por defecto para gastos? |
 |---|---|---|
 | | | |
 
 ### Reglas
-- Si digo "la de siempre" para gastos → cuenta por defecto: (definir)
-- Si digo "la del sueldo" → cuenta: (definir)
+- Cuenta nombrada = cuenta usada. Aunque el historial sugiera otra, manda lo que
+  yo escribo.
+- Nombre parcial que coincide con más de una cuenta (`Lulo` / `Lulo X`) →
+  pregunta, no elijas por parecido.
+- Si digo "la de siempre" o "la del sueldo" sin nombrarla, el agente debe tener
+  esa equivalencia escrita aquí; si no está, pregunta.
+- Cuenta en USD (`Binance`, `Lulo X`) → nunca convertir a COP sin que yo lo pida.
 <!-- CONVENCIONES:END -->

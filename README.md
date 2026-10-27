@@ -50,6 +50,14 @@ Permisos se gobiernan en `web.budgetbakers.com/settings/mcp-server`
 (por defecto solo lectura). Habilita `records.create`, `records.update` y
 `records.delete`. Se verifican con `get_client_profile` → `grantedScopes`.
 
+> **Ojo con el modelo de permisos.** El OAuth del MCP solo maneja dos scopes
+> gruesos: `read` y `write`. Los permisos finos (`records.create`,
+> `records.update`, `records.delete`…) **no son scopes de OAuth**: son
+> interruptores por tipo de dato en la web de Wallet. Ahí no verás una casilla
+> llamada `records.create`; verás una matriz de *entidades × acciones*
+> (Records / Accounts / Budgets / Categories / Labels con Read, Create,
+> Update, Delete). Detalle en [`rules/mcp_tools.md`](rules/mcp_tools.md).
+
 Inventario completo de tools, límites de lote y tabla de errores:
 [`rules/mcp_tools.md`](rules/mcp_tools.md).
 
@@ -88,6 +96,8 @@ plans/                 Planes de conciliación
 schemas/               plan.conciliacion.v1.json
 tests/                 54 tests
 scripts/budget.ps1     Runner nativo (Windows)
+docs/commands.md       Comandos y problemas frecuentes
+docs/historico/        Documentos del sistema anterior (ideas rescatadas)
 ```
 
 ## Knowledge Base

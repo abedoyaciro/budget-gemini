@@ -95,16 +95,55 @@ Tras escribir, una sola relectura; si no aparece, informar y esperar, no insisti
 
 ---
 
-## Permisos (capa Wallet, siempre presente)
+## Permisos: dos capas que no son lo mismo
 
-Se configuran en `web.budgetbakers.com/settings/mcp-server`. Por defecto solo lectura.
+### Capa 1 — OAuth (scopes gruesos)
 
-| Scope | Necesario para este proyecto |
-|---|---|
-| read (records, accounts, categories, labels, budgets) | **Sí** |
-| create `records` | **Sí** |
-| update `records` | **Sí** |
-| delete `records` | Sí (para corregir errores) |
-| create/update accounts, budgets, categories, labels | Solo si se piden explícitamente |
+El servidor MCP anuncia **solo dos scopes**: `read` y `write`
+(verificado en `/.well-known/oauth-protected-resource`).
 
-Verificación: `get_client_profile` → `grantedScopes` debe incluir los scopes marcados.
+- Si el token/cliente OAuth se autorizó solo con `read`, **toda** escritura falla.
+- Para ampliarlo hay que **volver a autorizar** el cliente (en OpenCode:
+  `/mcps` → `wallet` → sign in, o quitar y volver a añadir el servidor).
+
+### Capa 2 — Web de Wallet (permisos finos por entidad)
+
+`records.create`, `records.update`, `records.delete` **no son scopes OAuth**.
+Son interruptores por tipo de dato en
+`web.budgetbakers.com/settings/mcp-server` (perfil arriba a la derecha →
+**Settings** → sección **MCP**).
+
+Ahí no hay casillas con esos nombres literales: hay una **matriz
+entidad × acción**:
+
+| Entidad | Read | Create | Update | Delete |
+|---|---|---|---|---|
+| Records | ✅ | ✅ | ✅ | ✅ |
+| Accounts | ✅ | — | — | — |
+| Budgets | ✅ | — | — | — |
+| Categories | ✅ | — | — | — |
+| Labels | ✅ | — | — | — |
+
+Marca al menos **Records: Read + Create + Update** (Delete si quieres poder
+deshacer). Esta capa **siempre manda**: si está apagada aquí, ningún agente
+escribe, aunque su OAuth tenga `write`.
+
+### Verificación (sin escribir nada)
+
+```
+get_client_profile → grantedScopes
+```
+
+Debe incluir `records.create` y `records.update`. Si solo aparecen `*.read`,
+falta activar la capa 2 (o reautorizar la capa 1).
+
+### Si no encuentras la página
+
+1. Entra a `https://web.budgetbakers.com` con tu cuenta (la app web, no la móvil).
+2. Arriba a la derecha → tu perfil → **Settings**.
+3. Busca **MCP** o **API & MCP** en el menú lateral.
+4. Si sigue sin aparecer: plan Premium activo + MCP en beta; puede requerir
+   abrir primero la conexión desde el cliente para que la sección se muestre.
+
+No inventes nombres de tools ni scopes que no estén en este archivo. Si algo no
+está aquí, pregunta.
