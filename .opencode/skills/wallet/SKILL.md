@@ -18,14 +18,32 @@ el usuario**; este skill dice **qué pasos seguir**.
 
 ## Permisos
 
+**Estado verificado (2026-10-27):** todos los scopes concedidos, incluidos
+`accounts.delete`, `budgets.delete`, `categories.delete`, `labels.delete` y
+`records.delete`. La cuenta se autorizó con el máximo permiso posible.
+
 | Acción | Permiso |
 |---|---|
 | `get_*` (lectura) | libre |
 | `create_records` | confirmación del usuario |
 | `patch_records` | confirmación + mostrar antes/después |
-| `delete_documents` | confirmación explícita + `get_references` antes |
+| `delete_documents` de **records** | confirmación explícita + `get_references` antes |
+| `delete_documents` de **cuentas, categorías, etiquetas, presupuestos** | **PROHIBIDO sin doble confirmación escrita y `get_references` con referencias mostradas** |
+| `create_account` / `create_budget` / `create_category` / `create_label` | solo si lo piden; nunca por iniciativa |
 | `patch_accounts` (`initialBalance`) | doble confirmación, vía procedimiento P5 |
-| crear cuentas/categorías/etiquetas/presupuestos | solo si lo piden |
+
+### Regla de mínimo privilegio
+
+Aunque la cuenta tenga todos los scopes, el agente **no los usa todos**:
+
+- `delete_documents` se limita a `records` (corregir duplicados/errores).
+- Nunca borra una cuenta, categoría, etiqueta o presupuesto sin que el usuario
+  escriba explícitamente "borra <nombre>". Si hay referencias, se detiene y las
+  muestra; no reasigna por su cuenta.
+- Antes de cualquier borrado: `get_references` y mostrar qué lo usa.
+- Si el usuario quiere reducir riesgo: en `web.budgetbakers.com/settings/mcp-server`
+  → Manage Permissions → apagar **Delete** en Accounts, Budgets, Categories y
+  Labels. Basta con Records: Read/Create/Update.
 
 ---
 

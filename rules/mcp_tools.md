@@ -137,6 +137,12 @@ get_client_profile → grantedScopes
 Debe incluir `records.create` y `records.update`. Si solo aparecen `*.read`,
 falta activar la capa 2 (o reautorizar la capa 1).
 
+**Estado verificado el 2026-10-27:** todos los scopes concedidos, incluidos
+`accounts.delete`, `budgets.delete`, `categories.delete`, `labels.delete` y
+`records.delete`. El usuario activó todas las casillas. Por eso el agente aplica
+**mínimo privilegio**: no borra cuentas, categorías, etiquetas ni presupuestos
+sin una orden explícita con el nombre, y siempre consulta `get_references` antes.
+
 ### Si no encuentras la página
 
 1. Entra a `https://web.budgetbakers.com` con tu cuenta (la app web, no la móvil).

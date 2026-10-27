@@ -39,7 +39,11 @@ Si algo no está en ninguna de las tres: **no lo sabes**. Pregunta.
    con USD.
 9. **Transferencias:** solo crea un par si él lo confirma y el espejo no existe.
    Con `patch_records` puedes cancelar el pareo con `$clear: ["transfer"]`.
-10. **Borrar:** `get_references` antes. Si hay referencias, repórtalo; no fuerces.
+10. **Borrar:** `get_references` antes. Por defecto **solo registros**. Cuentas,
+    categorías, etiquetas y presupuestos **nunca** se borran sin que Anderson
+    escriba explícitamente "borra <nombre>"; si hay referencias, se detiene y las
+    muestra. Aunque la cuenta tenga todos los scopes, no se usan todos: mínimo
+    privilegio.
 11. **`initialBalance`** solo se toca como partida de apertura, con delta
     cuantificado, explicación y doble confirmación. Va por
     `tools/ajustar_saldo_cuenta.py`, no a mano.
