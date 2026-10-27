@@ -314,7 +314,7 @@ class WalletClient:
                 "recordDate": f"gte.{since_date}",
             }
             if until_date:
-                params["recordDate"] = f"gte.{since_date},{until_date}"
+                params["recordDate"] = f"gte.{since_date},lt.{until_date}"
 
             data = self._request("GET", "/records", params=params)
             pagina = data.get("records", [])
@@ -332,7 +332,10 @@ class WalletClient:
         return resultados
 
     def get_all_records(
-        self, since_date: str, until_date: Optional[str] = None
+        self,
+        since_date: str,
+        until_date: Optional[str] = None,
+        max_records: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """
         Lee registros de TODAS las cuentas en una sola paginación.
@@ -351,7 +354,7 @@ class WalletClient:
         while True:
             record_date = f"gte.{since_date}"
             if until_date:
-                record_date = f"gte.{since_date},{until_date}"
+                record_date = f"gte.{since_date},lt.{until_date}"
             data = self._request(
                 "GET",
                 "/records",
@@ -363,6 +366,9 @@ class WalletClient:
             )
             pagina = data.get("records", [])
             resultados.extend(pagina)
+
+            if max_records is not None and len(resultados) >= max_records:
+                return resultados[:max_records]
 
             next_offset = data.get("nextOffset")
             if next_offset is None or not pagina or next_offset == offset:

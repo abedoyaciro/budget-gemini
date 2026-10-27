@@ -129,6 +129,45 @@ def test_get_records_exige_since_date():
         client.get_records("acc", since_date="")
 
 
+def test_get_records_rango_usa_prefijo_lt(monkeypatch):
+    client = _client()
+    capturado = {}
+
+    def fake_request(method, path, *, params=None, json=None):
+        capturado.update(params or {})
+        return {"records": [], "nextOffset": None}
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    client.get_records("acc", "2026-10-01", "2026-11-01")
+    assert capturado["recordDate"] == "gte.2026-10-01,lt.2026-11-01"
+
+
+def test_get_all_records_rango_usa_prefijo_lt(monkeypatch):
+    client = _client()
+    capturado = {}
+
+    def fake_request(method, path, *, params=None, json=None):
+        capturado.update(params or {})
+        return {"records": [], "nextOffset": None}
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    client.get_all_records("2026-10-01", "2026-11-01")
+    assert capturado["recordDate"] == "gte.2026-10-01,lt.2026-11-01"
+
+
+def test_get_all_records_respeta_max_records(monkeypatch):
+    client = _client()
+
+    def fake_request(method, path, *, params=None, json=None):
+        return {
+            "records": [{"id": "1"}, {"id": "2"}, {"id": "3"}],
+            "nextOffset": 1,
+        }
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    assert len(client.get_all_records("2026-10-01", max_records=2)) == 2
+
+
 def test_crear_sin_registros_no_llama_a_la_api():
     client = _client()
     resultado = client.create_records([])
