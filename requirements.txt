@@ -1,8 +1,9 @@
-google-genai
-python-dotenv
+# Runtime
 requests
-pydantic
-pytz
+python-dotenv
 
-# Tests (make test / .\scripts\budget.ps1 test)
+# Tests
 pytest
+
+# Nota: el razonamiento lo hace el agente (OpenCode/Hermes) via MCP.
+# Este repo no lleva SDK de IA: se elimino google-genai junto con el pipeline.

@@ -278,6 +278,11 @@ class WalletClient:
                 return cat["id"]
         return None
 
+    def get_labels(self) -> List[Dict[str, Any]]:
+        """GET /labels. Etiquetas (hashtags) del usuario."""
+        data = self._request("GET", "/labels", params={"limit": MAX_PAGE_SIZE})
+        return data.get("labels", [])
+
     # ── Registros ─────────────────────────────────────────────────────────────
 
     def get_records(
@@ -320,6 +325,46 @@ class WalletClient:
 
             next_offset = data.get("nextOffset")
             # Sin nextOffset o página vacía => no hay más
+            if next_offset is None or not pagina or next_offset == offset:
+                break
+            offset = next_offset
+
+        return resultados
+
+    def get_all_records(
+        self, since_date: str, until_date: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Lee registros de TODAS las cuentas en una sola paginación.
+
+        Sirve para el bootstrap de la Knowledge Base (evita N peticiones, una
+        por cuenta). Igual que get_records: recordDate es obligatorio.
+        """
+        if not since_date:
+            raise ValueError(
+                "since_date es obligatorio: GET /records sin recordDate devuelve un subset"
+            )
+
+        resultados: List[Dict[str, Any]] = []
+        offset = 0
+
+        while True:
+            record_date = f"gte.{since_date}"
+            if until_date:
+                record_date = f"gte.{since_date},{until_date}"
+            data = self._request(
+                "GET",
+                "/records",
+                params={
+                    "limit": MAX_PAGE_SIZE,
+                    "offset": offset,
+                    "recordDate": record_date,
+                },
+            )
+            pagina = data.get("records", [])
+            resultados.extend(pagina)
+
+            next_offset = data.get("nextOffset")
             if next_offset is None or not pagina or next_offset == offset:
                 break
             offset = next_offset

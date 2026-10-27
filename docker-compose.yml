@@ -1,208 +1,29 @@
+# Docker es opcional. En Windows usa el runner nativo:
+#   .\scripts\budget.ps1 help
+#
+# Uso de este compose:
+#   docker compose run --rm wallet-tools python tools/backup_wallet.py
+#   docker compose run --rm wallet-tools python tools/bootstrap_rules.py --days 0
+#   docker compose run --rm wallet-tools python tools/conciliar_cuenta.py --plan plans/x.json --dry-run
+
 services:
-
-  # ── Extractor simple: extrae y sobreescribe snapshot_wallet.json ──────────
-  # Uso directo del extractor (sin gestión de histórico).
-  # Preferir 'snapshot' para uso normal.
-  budget-extractor:
+  wallet-tools:
     build: .
-    image: budget-gemini-app:latest
-    container_name: budget-extractor
+    image: wallet-tools:latest
+    container_name: wallet-tools
     env_file:
       - .env
     environment:
-      - RECORDS_LIMIT=${RECORDS_LIMIT:-200}
-      - DAYS_BACK=${DAYS_BACK:-90}
-      - PYTHONPATH=/app/src
+      - PYTHONUTF8=1
+      - PYTHONIOENCODING=utf-8
+      - PYTHONPATH=/app/tools
     volumes:
       - ./output:/app/output
+      - ./rules:/app/rules
+      - ./plans:/app/plans
+    # El DNS de Docker fallo antes en esta red (Errno 11001): fijarlo evita
+    # extracciones a medias.
     dns:
       - 8.8.8.8
-    command: ["python", "src/extractor_wallet.py"]
+    command: ["python", "tools/backup_wallet.py"]
     restart: "no"
-
-  # ── Snapshot: extrae + guarda histórico + detecta cambios ─────────────────
-  # Uso recomendado para análisis periódico. Guarda en output/snapshots/.
-  # Parámetros: --days 90 (default) | --full | --limit 200
-  budget-snapshot:
-    build: .
-    image: budget-gemini-app:latest
-    container_name: budget-snapshot
-    env_file:
-      - .env
-    environment:
-      - RECORDS_LIMIT=${RECORDS_LIMIT:-200}
-      - DAYS_BACK=${DAYS_BACK:-90}
-      - PYTHONPATH=/app/src
-    volumes:
-      - ./output:/app/output
-    dns:
-      - 8.8.8.8
-    command: ["python", "src/gestor_snapshots.py", "--days", "${DAYS_BACK:-90}", "--limit", "${RECORDS_LIMIT:-200}"]
-    restart: "no"
-
-  # ── Historial: muestra los snapshots almacenados ──────────────────────────
-  budget-historial:
-    build: .
-    image: budget-gemini-app:latest
-    container_name: budget-historial
-    env_file:
-      - .env
-    environment:
-      - PYTHONPATH=/app/src
-    volumes:
-      - ./output:/app/output
-    dns:
-      - 8.8.8.8
-    command: ["python", "src/gestor_snapshots.py", "--historial"]
-    restart: "no"
-
-  # ── Aprendizaje: detecta patrones y propone reglas contables ─────────────
-  # Ejecutar después de budget-snapshot.
-  # Parámetros opcionales: --temperatura 0.3 | --max-registros 150
-  budget-aprender:
-    build: .
-    image: budget-gemini-app:latest
-    container_name: budget-aprender
-    env_file:
-      - .env
-    environment:
-      - PYTHONPATH=/app/src
-      - GEMINI_MODEL_APRENDIZAJE=${GEMINI_MODEL_APRENDIZAJE:-gemini-3.1-flash-lite}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.1-flash-lite}
-      - GEMINI_TEMPERATURA=${GEMINI_TEMPERATURA:-0.3}
-      - APRENDIZAJE_MAX_REGISTROS=${APRENDIZAJE_MAX_REGISTROS:-150}
-    volumes:
-      - ./output:/app/output
-    dns:
-      - 8.8.8.8
-    command: ["python", "src/aprendizaje_reglas.py"]
-    restart: "no"
-
-  # ── Confirmador: revisión interactiva de reglas propuestas ───────────────
-  # Requiere TTY para la entrada del usuario.
-  # Uso: docker-compose run --rm budget-confirmar-reglas
-  # Para procesar todas (no solo pendientes): añadir --todas
-  budget-confirmar-reglas:
-    build: .
-    image: budget-gemini-app:latest
-    container_name: budget-confirmar-reglas
-    env_file:
-      - .env
-    environment:
-      - PYTHONPATH=/app/src
-      - GEMINI_MODEL_CONFIRMADOR=${GEMINI_MODEL_CONFIRMADOR:-gemini-3.1-flash-lite}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.1-flash-lite}
-      - GEMINI_TEMPERATURA=${GEMINI_TEMPERATURA:-0.3}
-    volumes:
-      - ./output:/app/output
-    dns:
-      - 8.8.8.8
-    command: ["python", "src/confirmador_reglas.py"]
-    stdin_open: true
-    tty: true
-    restart: "no"
-
-  # ── Analizador: genera diagnóstico financiero con Gemini AI ───────────────
-  # Requiere que exista output/snapshot_wallet.json (ejecutar snapshot antes).
-  budget-analyzer:
-    build: .
-    image: budget-gemini-app:latest
-    container_name: budget-analyzer
-    env_file:
-      - .env
-    environment:
-      - PYTHONPATH=/app/src
-      - GEMINI_MODEL_ANALIZADOR=${GEMINI_MODEL_ANALIZADOR:-gemini-3.1-flash-lite}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.1-flash-lite}
-      - GEMINI_TEMPERATURA=${GEMINI_TEMPERATURA:-0.3}
-    volumes:
-      - ./output:/app/output
-    dns:
-      - 8.8.8.8
-    command: ["python", "src/analizador_finanzas.py"]
-    restart: "no"
-
-  # ── Enriquecimiento: mejora notas, etiquetas y categorías via Gemini ─────
-  # Uso: docker-compose run --rm budget-enriquecer
-  # Modo automático (sin confirmación): añadir --auto
-  budget-enriquecer:
-    build: .
-    image: budget-gemini-app:latest
-    container_name: budget-enriquecer
-    env_file:
-      - .env
-    environment:
-      - PYTHONPATH=/app/src
-      - GEMINI_MODEL_APRENDIZAJE=${GEMINI_MODEL_APRENDIZAJE:-gemini-3.1-flash-lite}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.1-flash-lite}
-      - GEMINI_TEMPERATURA=${GEMINI_TEMPERATURA:-0.3}
-    volumes:
-      - ./output:/app/output
-    dns:
-      - 8.8.8.8
-    command: ["python", "src/asistente_enriquecimiento.py"]
-    stdin_open: true
-    tty: true
-    restart: "no"
-
-  # ── Dashboard: genera output/dashboard.html desde los JSONs de output/ ──
-  # Uso: docker-compose run --rm budget-dashboard
-  budget-dashboard:
-    build: .
-    image: budget-gemini-app:latest
-    container_name: budget-dashboard
-    env_file:
-      - .env
-    environment:
-      - PYTHONPATH=/app/src
-    volumes:
-      - ./output:/app/output
-    dns:
-      - 8.8.8.8
-    command: ["python", "src/generar_dashboard.py"]
-    restart: "no"
-
-  # ── Pipeline estándar: snapshot + analyze ────────────────────────────────
-  # Uso: docker-compose run --rm budget-pipeline
-  # Pipeline completo: docker-compose run --rm budget-pipeline --full
-  # Solo un paso:      docker-compose run --rm budget-pipeline --only learn
-  # Saltarse un paso:  docker-compose run --rm budget-pipeline --skip enrich
-  budget-pipeline:
-    build: .
-    image: budget-gemini-app:latest
-    container_name: budget-pipeline
-    env_file:
-      - .env
-    environment:
-      - PYTHONPATH=/app/src
-      - RECORDS_LIMIT=${RECORDS_LIMIT:-200}
-      - DAYS_BACK=${DAYS_BACK:-90}
-      - APRENDIZAJE_MAX_REGISTROS=${APRENDIZAJE_MAX_REGISTROS:-150}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.1-flash-lite}
-      - GEMINI_MODEL_ANALIZADOR=${GEMINI_MODEL_ANALIZADOR:-gemini-3.1-flash-lite}
-      - GEMINI_MODEL_APRENDIZAJE=${GEMINI_MODEL_APRENDIZAJE:-gemini-3.1-flash-lite}
-      - GEMINI_MODEL_CONFIRMADOR=${GEMINI_MODEL_CONFIRMADOR:-gemini-3.1-flash-lite}
-      - GEMINI_TEMPERATURA=${GEMINI_TEMPERATURA:-0.3}
-    volumes:
-      - ./output:/app/output
-      - ./run_pipeline.py:/app/run_pipeline.py
-    dns:
-      - 8.8.8.8
-    command: ["python", "run_pipeline.py"]
-    restart: "no"
-
-  # ── Prueba de Gemini (perfil 'test', no se ejecuta por defecto) ──────────
-  gemini-test:
-    build: .
-    image: budget-gemini-app:latest
-    container_name: gemini-test
-    env_file:
-      - .env
-    dns:
-      - 8.8.8.8
-    command: ["python", "tests/prueba_gemini.py"]
-    restart: "no"
-    profiles:
-      - test
-
-# Made with Bob

@@ -1,205 +1,126 @@
-# Análisis Financiero Inteligente — Gemini AI + BudgetBakers Wallet
+# Wallet + Knowledge Base
 
-> **WIP** — Proyecto personal en evolución activa.
-> Plan: evolucionar hacia un Cloud Support Lab (Docker + CI/CD + tests automatizados).
+Finanzas personales en lenguaje natural sobre **BudgetBakers Wallet (Premium)**
+con el MCP oficial, una base de conocimiento local y cero código de IA.
 
-Sistema de análisis financiero personal que integra **Google Gemini AI** con la
-**API REST de BudgetBakers Wallet**. Extrae transacciones, mantiene un histórico
-de snapshots con detección de cambios, aprende reglas contables automáticamente,
-genera diagnósticos con memoria y **concilia cuentas contra capturas del banco**.
+> **WIP** — proyecto personal en evolución.
 
----
+## Idea
 
-## Inicio rápido
+```
+Wallet (MCP oficial)  ←→  Agente (OpenCode / Hermes)  ←→  rules/ (Knowledge Base)
+                                     ↕
+                            tools/ (escape hatch determinista)
+```
 
-### Windows (sin Docker, sin make)
+- **El agente razona.** No hay pipeline, ni prompts empaquetados, ni SDK de IA
+  en el repo. OpenCode o Hermes leen el MCP y deciden.
+- **`rules/` guarda cómo piensas tú.** Hechos observados en tu histórico +
+  convenciones que escribes a mano. Es markdown versionado, editable y barato
+  de leer.
+- **`tools/` es el escape hatch.** Lo que el MCP no cubre bien: respaldo,
+  conciliación determinista contra capturas, ajuste de apertura, bootstrap de
+  la KB.
+
+## Uso diario
+
+Dentro del agente, en lenguaje natural:
+
+| Dices | Pasa |
+|---|---|
+| "Gasté 45.300 en servicentro con Nequi" | Resuelve cuenta, categoría (Fuel) y etiquetas desde `rules/`, muestran resumen, confirman y registran |
+| "¿Cuánto tengo?" | Tabla por cuenta + total por moneda |
+| "Informe de octubre" | Agregación por categoría |
+| "Concilia Pibank con esta captura" | Plan v1 → `tools/conciliar_cuenta.py` |
+| "Corrige la categoría de ese movimiento" | `patch_records` con antes/después |
+
+Reglas duras (aprobación antes de escribir, idempotencia, IDs por `systemId`,
+fechas en `America/Bogota`, sin conversiones implícitas): ver `AGENTS.md`.
+
+## Conectar el MCP
 
 ```powershell
-.\scripts\budget.ps1 help
-.\scripts\budget.ps1 snapshot -Days 0
-.\scripts\budget.ps1 analyze
+opencode mcp add wallet --url https://mcp.wallet.budgetbakers.com
 ```
 
-### Con Docker / make
+Luego, en la interfaz: `/mcps` → `wallet` → **sign in** (OAuth con email y
+código de 6 dígitos).
 
-```bash
-make doctor          # detecta Docker; si no responde, usa modo nativo
-make snapshot DAYS=0
-make analyze
-make test
-```
+Permisos se gobiernan en `web.budgetbakers.com/settings/mcp-server`
+(por defecto solo lectura). Habilita `records.create`, `records.update` y
+`records.delete`. Se verifican con `get_client_profile` → `grantedScopes`.
 
----
+Inventario completo de tools, límites de lote y tabla de errores:
+[`rules/mcp_tools.md`](rules/mcp_tools.md).
 
-## Arquitectura
-
-```
-budget-gemini/
-├── src/
-│   ├── wallet_client.py            # Cliente API: única fuente de contratos
-│   ├── plan_conciliacion.py        # Esquema v1, parsing es-CO, matching
-│   ├── conciliar_cuenta.py         # Conciliación contra capturas del banco
-│   ├── ajustar_saldo_cuenta.py     # Partida de apertura (initialBalance)
-│   ├── extractor_wallet.py         # Extracción paginada con retry
-│   ├── gestor_snapshots.py         # Histórico + detección de cambios
-│   ├── analizador_finanzas.py      # Diagnóstico con memoria
-│   ├── aprendizaje_reglas.py       # Detección de patrones
-│   ├── confirmador_reglas.py       # Confirmación interactiva
-│   ├── asistente_enriquecimiento.py# Notas/etiquetas/categorías
-│   ├── generar_dashboard.py        # HTML con Chart.js + Tailwind
-│   └── logging_config.py
-├── schemas/
-│   └── plan.conciliacion.v1.json   # Contrato del plan de conciliación
-├── plans/                          # Planes de conciliación por cuenta
-├── scripts/
-│   └── budget.ps1                  # Runner nativo Windows
-├── tests/                          # 54 tests (pytest)
-├── docs/
-│   ├── commands.md
-│   ├── budgetbakers.openapi.json
-│   ├── interactions.openapi.json
-│   ├── docker-guide.md
-│   └── docker-compose-guide.md
-├── output/                         # Snapshots, diagnósticos, logs, dashboard
-├── Makefile                        # Docker con fallback nativo
-├── Dockerfile
-├── docker-compose.yml
-└── requirements.txt
-```
-
----
-
-## Conciliación de cuentas
-
-Flujo genérico, válido para cualquier cuenta:
-
-1. El humano adjunta capturas del banco (y opcionalmente de Wallet).
-2. El agente las lee con visión y extrae movimientos + saldo corrido.
-3. Se construye un `plan.conciliacion.v1` (ver `schemas/`).
-4. `reconcile --dry-run` muestra el reporte: saldo, saldo corrido, faltantes,
-   ya existentes y transferencias.
-5. Tras aprobación humana se aplica con `--yes`.
-6. El propio script verifica que `currentBalance` cuadre con la captura.
+## Herramientas
 
 ```powershell
-.\scripts\budget.ps1 snapshot -Days 0 -Limit 0
-.\scripts\budget.ps1 reconcile -Plan plans/plan_conciliacion_pibank.json -DryRun
-.\scripts\budget.ps1 reconcile -Plan plans/plan_conciliacion_pibank.json -Yes
+.\scripts\budget.ps1 doctor        # entorno, MCP y KB
+.\scripts\budget.ps1 backup        # respaldo completo a output/
+.\scripts\budget.ps1 bootstrap     # (re)genera rules/*.md
+.\scripts\budget.ps1 reconcile -Plan plans\plan_pibank.json -DryRun
+.\scripts\budget.ps1 ajustar -Cuenta Pibank -InitialBalance 2.580.398,47 -Delta 2.580.400,24 -Explicacion "Residual de apertura"
+.\scripts\budget.ps1 test
 ```
 
-**Los intereses son transacciones normales** (`income`, categoría
-`income__interest_dividends`). No se suman a `initialBalance`.
+Sin PowerShell: `make <target>` o `python tools/<script>.py` (con `PYTHONPATH=tools`).
 
-### Contratos de la API (verificados)
+## Estructura
 
-| Operación | Contrato real |
-|-----------|---------------|
-| `GET /records` | Siempre con `recordDate=gte.<ISO>`; solo con `accountId` devuelve 0 registros |
-| Paginación | `limit` ≤ 200; avanzar con `nextOffset` |
-| `POST` / `PATCH /records` | Body = array raíz (`{"records": [...]}` → 400) |
-| Campos escribibles | `accountId`, `amount{value,currencyCode}`, `recordDate`, `note`, `categoryId`, `counterParty`, `labelIds` |
-| Campos rechazados (400) | `recordType`, `recordState`, `source`, `paymentType` |
-| `PATCH /accounts` | Batch sobre la colección; `PATCH /accounts/{id}` → 404 |
-| Transferencias | Salida: `transfer: {type: "paired", transferId, mirrorRecord}`; no existe `pairingMode` |
-| Categorías | Se resuelven por `systemId` en runtime; aborta si no hay match exacto |
-
-### Regla de `initialBalance`
-
-El residual anterior a la ventana de conciliación se corrige como **partida de
-apertura**, no como asiento de "Ajuste de conciliación" (ese ensuciaría los
-reportes de ingresos y gastos). Requiere delta cuantificado, explicación,
-aprobación humana explícita y registro en `output/enriquecimiento_log.json`.
-
-```powershell
-.\scripts\budget.ps1 ajustar -Cuenta Pibank -InitialBalance 2580398.47 `
-    -Delta 2580400.24 -Explicacion "Residual de apertura pre-ventana"
+```
+AGENTS.md              Identidad y reglas del agente
+opencode.json          MCP de Wallet
+rules/
+  cuentas.md           Cuentas, moneda, sync, saldo (hechos) + tu rol (convenciones)
+  categorias.md        systemId + consistencia de términos de nota
+  etiquetas.md         Uso real de cada etiqueta
+  informes.md          Plantillas y reglas de coste
+  mcp_tools.md         Inventario real de tools del MCP
+tools/
+  wallet_client.py     Cliente REST con contratos verificados
+  backup_wallet.py     Respaldo JSON
+  bootstrap_rules.py   Genera rules/*.md (determinista, sin LLM)
+  plan_conciliacion.py Esquema v1 + parsing es-CO + matching
+  conciliar_cuenta.py  Conciliación contra capturas
+  ajustar_saldo_cuenta.py  Partida de apertura (initialBalance)
+plans/                 Planes de conciliación
+schemas/               plan.conciliacion.v1.json
+tests/                 54 tests
+scripts/budget.ps1     Runner nativo (Windows)
 ```
 
----
+## Knowledge Base
 
-## Variables de entorno
+`rules/*.md` tiene dos zonas:
 
-Crea `.env` en la raíz (copia desde `.env.example`):
+```markdown
+<!-- HECHOS:START -->   ... se regenera con tools/bootstrap_rules.py
+<!-- HECHOS:END -->
 
-```env
-GEMINI_API_KEY=tu_api_key
-WALLET_API_TOKEN=tu_token
-
-# Extracción
-DAYS_BACK=90          # 0 = histórico completo (usa piso de fecha)
-RECORDS_LIMIT=0       # 0 = sin tope; pagina completo y luego trunca
-
-# Modelos Gemini
-GEMINI_MODEL_ANALIZADOR=gemini-3.1-flash-lite
-GEMINI_MODEL_APRENDIZAJE=gemini-3.1-flash-lite
-GEMINI_MODEL_CONFIRMADOR=gemini-3.1-flash-lite
-GEMINI_TEMPERATURA=0.3
+<!-- CONVENCIONES:START -->   ... tuya, nunca se sobrescribe
+<!-- CONVENCIONES:END -->
 ```
 
-`.env` está en `.gitignore`.
-
----
-
-## Módulos
-
-### `wallet_client.py`
-
-Única fuente de verdad para HTTP. Encapsula contratos, resuelve categorías por
-`systemId`, pagina con `nextOffset`, reintenta con backoff y **falla fuerte**
-(nunca devuelve datos parciales como si fueran completos).
-
-### `conciliar_cuenta.py`
-
-Valida el plan, compara contra Wallet (fecha ±3 días + monto exacto), crea solo
-los faltantes, analiza transferencias sin duplicar pares, valida el saldo corrido
-movimiento por movimiento y verifica el resultado contra el saldo de la captura.
-
-### `ajustar_saldo_cuenta.py`
-
-Ajuste de partida de apertura. Sin `--auto`: la aprobación humana es obligatoria.
-
-### `extractor_wallet.py`
-
-Extracción paginada. `DAYS_BACK=0` usa un piso de fecha explícito (`2000-01-01`),
-porque sin `recordDate` la API devuelve un subset. `RECORDS_LIMIT` es tope total:
-se pagina completo y luego se trunca.
-
-### `gestor_snapshots.py`
-
-Histórico en `output/snapshots/`. La metadata del envelope y del snapshot
-coinciden (`tipo_extraccion`, `ventana_dias`).
-
----
+Correr `bootstrap` de nuevo refresca los hechos y **conserva** lo que escribiste.
+El aprendizaje es editar el markdown: explícito, auditable y sin coste de tokens.
 
 ## Tests
 
 ```powershell
 .\scripts\budget.ps1 test
-# o
-make test
-# o
-PYTHONUTF8=1 PYTHONPATH=src python -m pytest tests -q
 ```
 
-54 tests cubriendo: parsing es-CO, tolerancia de fechas, validación del plan,
-contratos de escritura, shape de transferencias, paginación y resolución de
-categorías en runtime.
-
----
+Cubren parsing es-CO, tolerancia de fechas, validación del plan, contratos de
+escritura, shape de transferencias, paginación y resolución de categorías por
+`systemId` en runtime.
 
 ## Documentación
 
-- [`docs/commands.md`](docs/commands.md) — comandos y solución de problemas
-- [`docs/budgetbakers.openapi.json`](docs/budgetbakers.openapi.json) — API Wallet
-- [`docs/interactions.openapi.json`](docs/interactions.openapi.json) — Gemini Interactions
-- [`docs/docker-guide.md`](docs/docker-guide.md)
-- [`docs/docker-compose-guide.md`](docs/docker-compose-guide.md)
-
----
-
-## Licencia
-
-Proyecto privado
+- [`AGENTS.md`](AGENTS.md) — reglas que sigue el agente
+- [`rules/mcp_tools.md`](rules/mcp_tools.md) — tools reales del MCP
+- [`docs/commands.md`](docs/commands.md) — comandos y problemas frecuentes
+- [`docs/budgetbakers.openapi.json`](docs/budgetbakers.openapi.json) — API REST
 
 ## Autor
 
