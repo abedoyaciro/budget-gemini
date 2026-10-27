@@ -9,7 +9,9 @@ Versión: 3.0 — Extracción completa según OpenAPI 1.3.0
 """
 
 import os
+import sys
 import json
+import time
 import logging
 import requests
 from typing import Any, Dict, List, Optional, Tuple
@@ -23,6 +25,15 @@ logger = setup_logging(__name__)
 
 # Cargar variables de entorno desde .env
 load_dotenv()
+
+# Windows: cp1252 no puede codificar emoji/box-drawing. Forzar UTF-8 en stdout
+# evita que un print() final convierta una extracción exitosa en exit code 1.
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # pragma: no cover - entornos sin TTY
+        pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -122,96 +133,202 @@ class WalletContextExtractor:
             logger.warning("No se pudo obtener tasa USD→COP: %s", exc)
             return None
 
-    def _obtener_tasas_historicas_usd_cop(self, fechas_iso: List[str]) -> Dict[str, float]:
-        """Consulta tasas históricas USD→COP por fecha YYYY-MM-DD."""
-        tasas: Dict[str, float] = {}
-        fechas = sorted({(f or "")[:10] for f in fechas_iso if f})
-        for fecha in fechas:
+    # Dominio vigente de Frankfurter (api.frankfurter.app devuelve 404 en fechas
+    # recientes). Se usa .dev con fallback al host antiguo.
+    FRANKFURTER_HOSTS = ("https://api.frankfurter.dev/v1", "https://api.frankfurter.app")
+
+    def _obtener_tasa_historica(self, fecha: str) -> Optional[float]:
+        """Tasa histórica USD→COP para una fecha, probando ambos hosts."""
+        for host in self.FRANKFURTER_HOSTS:
             try:
                 response = requests.get(
-                    f"https://api.frankfurter.app/{fecha}?from=USD&to=COP",
+                    f"{host}/{fecha}?base=USD&symbols=COP",
                     timeout=15,
                 )
+                if response.status_code == 404:
+                    continue
                 response.raise_for_status()
-                data = response.json()
-                tasa = (data.get("rates") or {}).get("COP")
+                tasa = ((response.json() or {}).get("rates") or {}).get("COP")
                 if tasa is not None:
-                    tasas[fecha] = float(tasa)
-            except Exception as exc:
-                logger.warning("No se pudo obtener tasa histórica USD→COP para %s: %s", fecha, exc)
+                    return float(tasa)
+            except Exception:
+                continue
+        return None
+
+    def _obtener_tasas_historicas_usd_cop(self, fechas_iso: List[str]) -> Dict[str, float]:
+        """
+        Consulta tasas históricas USD→COP por fecha YYYY-MM-DD.
+
+        Cachea en memoria por corrida para no repetir llamadas y no ensuciar
+        el log con warnings repetidos cuando una fecha no está disponible.
+        """
+        tasas: Dict[str, float] = {}
+        fallidas: List[str] = []
+        fechas = sorted({(f or "")[:10] for f in fechas_iso if f})
+        for fecha in fechas:
+            tasa = self._obtener_tasa_historica(fecha)
+            if tasa is not None:
+                tasas[fecha] = tasa
+            else:
+                fallidas.append(fecha)
+        if fallidas:
+            logger.debug(
+                "Tasas históricas no disponibles para %d fecha(s): %s",
+                len(fallidas),
+                ", ".join(fallidas[:5]) + ("…" if len(fallidas) > 5 else ""),
+            )
         return tasas
 
     # ── Capa de transporte ────────────────────────────────────────────────────
+
+    # Reintentos por endpoint: el DNS falla de forma intermitente en Windows
+    # (Errno 11001 / 10054). Sin retry, un fallo devolvía datos parciales como
+    # si fueran completos.
+    MAX_RETRIES = 5
+
+    def _get_json(
+        self,
+        url: str,
+        params: Dict[str, Any],
+        endpoint: str,
+    ) -> Dict[str, Any]:
+        """
+        GET con retry/backoff exponencial. Falla fuerte al agotar intentos.
+
+        Nunca devuelve una respuesta parcial: si no se puede leer una página,
+        la extracción se aborta para no guardar un snapshot incompleto.
+        """
+        ultimo_error: Optional[str] = None
+
+        for intento in range(self.MAX_RETRIES):
+            try:
+                response = requests.get(
+                    url, headers=self.headers, params=params, timeout=30
+                )
+
+                # La cabecera puede no venir: es informativa, no bloqueante.
+                remaining = response.headers.get("X-RateLimit-Remaining")
+                if remaining is not None:
+                    try:
+                        if int(remaining) < 10:
+                            logger.warning(
+                                "Cuota de API baja. Restantes: %s", remaining
+                            )
+                    except ValueError:
+                        pass
+
+                response.raise_for_status()
+                data = response.json()
+                return data if isinstance(data, dict) else {"items": data}
+
+            except requests.exceptions.HTTPError as exc:
+                status = getattr(exc.response, "status_code", None)
+                ultimo_error = f"HTTP {status}: {exc}"
+                # 4xx (salvo 429) no se arregla reintentando
+                if status and 400 <= status < 500 and status != 429:
+                    if status == 401:
+                        logger.error(
+                            "401 Unauthorized: verifica que WALLET_API_TOKEN no haya expirado."
+                        )
+                    raise RuntimeError(
+                        f"GET /{endpoint} falló con {ultimo_error}"
+                    ) from exc
+            except ValueError as exc:
+                raise RuntimeError(
+                    f"GET /{endpoint} devolvió JSON inválido: {exc}"
+                ) from exc
+            except requests.exceptions.RequestException as exc:
+                ultimo_error = f"{type(exc).__name__}: {exc}"
+
+            if intento < self.MAX_RETRIES - 1:
+                delay = min(1.5 * (2 ** intento), 15.0)
+                logger.warning(
+                    "Reintento %d/%d en GET /%s (%s) tras %.1fs",
+                    intento + 1,
+                    self.MAX_RETRIES,
+                    endpoint,
+                    (ultimo_error or "").split(":")[0],
+                    delay,
+                )
+                time.sleep(delay)
+
+        raise RuntimeError(
+            f"GET /{endpoint} falló tras {self.MAX_RETRIES} intentos: {ultimo_error}"
+        )
 
     def _get_paginated(
         self,
         endpoint: str,
         data_key: str,
         extra_params: Optional[Dict[str, Any]] = None,
+        max_records: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Realiza GET con paginación automática hasta recuperar todos los ítems.
+        GET paginado con nextOffset hasta agotar páginas.
 
         Args:
-            endpoint:    Ruta relativa (ej. "accounts", "records").
-            data_key:    Clave de la respuesta JSON que contiene el array de datos.
-            extra_params: Parámetros de consulta adicionales (filtros, etc.).
+            endpoint:     Ruta relativa (ej. "accounts", "records").
+            data_key:     Clave del array en la respuesta JSON.
+            extra_params: Parámetros de consulta adicionales (filtros).
+            max_records:  Tope TOTAL de ítems. Se pagina completo y luego se
+                          trunca: nunca se corta la paginación a mitad.
 
         Returns:
-            Lista completa de objetos recuperados.
+            Lista de objetos recuperados.
+
+        Raises:
+            RuntimeError: si alguna página falla tras los reintentos. Se
+            prefiere fallar a devolver datos parciales como si fueran completos.
         """
         url = f"{self.BASE_URL}/{endpoint}"
         resultados: List[Dict[str, Any]] = []
         offset = 0
+        paginas = 0
 
         while True:
+            # limit > 200 devuelve 400: se capea siempre a MAX_PAGE_SIZE.
             params: Dict[str, Any] = {
                 "limit": self.MAX_PAGE_SIZE,
                 "offset": offset,
             }
             if extra_params:
-                params.update(extra_params)
+                # El caller no puede imponer un limit mayor al máximo de la API
+                filtros = {k: v for k, v in extra_params.items() if k != "limit"}
+                params.update(filtros)
 
-            try:
-                response = requests.get(url, headers=self.headers, params=params, timeout=30)
-
-                # Advertencia de rate-limit
-                remaining = response.headers.get("X-RateLimit-Remaining")
-                if remaining and int(remaining) < 10:
-                    logger.warning("⚠️  Cuota de API baja. Restantes: %s", remaining)
-
-                response.raise_for_status()
-                data = response.json()
-
-            except requests.exceptions.HTTPError as exc:
-                logger.error("HTTP %s en /%s: %s", response.status_code, endpoint, exc)
-                if response.status_code == 401:
-                    logger.error("   Verifica que el Bearer Token no haya expirado.")
-                break
-            except requests.exceptions.JSONDecodeError as exc:
-                logger.error("JSON inválido en /%s: %s", endpoint, exc)
-                break
-            except Exception as exc:
-                logger.error("Error inesperado en /%s: %s", endpoint, exc)
-                break
-
-            # Extraer items de la respuesta
-            if isinstance(data, list):
-                page_items = data
-            elif isinstance(data, dict):
-                page_items = data.get(data_key, [])
-            else:
-                logger.warning("Tipo de respuesta desconocido en /%s: %s", endpoint, type(data))
-                break
+            data = self._get_json(url, params, endpoint)
+            page_items = data.get(data_key) or data.get("items") or []
+            if not isinstance(page_items, list):
+                raise RuntimeError(
+                    f"Respuesta inesperada en /{endpoint}: '{data_key}' no es lista"
+                )
 
             resultados.extend(page_items)
+            paginas += 1
 
-            # Verificar si hay más páginas (next_offset en PaginatedResponse)
-            next_offset = data.get("nextOffset") if isinstance(data, dict) else None
-            if next_offset is None or len(page_items) < self.MAX_PAGE_SIZE:
-                break  # No hay más páginas
+            next_offset = data.get("nextOffset")
+            if (
+                next_offset is None
+                or not page_items
+                or next_offset == offset
+                or len(page_items) < self.MAX_PAGE_SIZE
+            ):
+                break
 
             offset = next_offset
+
+        logger.debug(
+            "GET /%s -> %d ítems en %d página(s)", endpoint, len(resultados), paginas
+        )
+
+        if max_records is not None and len(resultados) > max_records:
+            logger.warning(
+                "Se recuperaron %d ítems en /%s; se truncan a max_records=%d",
+                len(resultados),
+                endpoint,
+                max_records,
+            )
+            return resultados[:max_records]
 
         return resultados
 
@@ -497,54 +614,66 @@ class WalletContextExtractor:
 
     # ── Orquestador principal ─────────────────────────────────────────────────
 
+    # Piso absoluto de la ventana cuando days_back == 0.
+    # Sin recordDate la API devuelve un subset (22 registros en vez de todo),
+    # así que NUNCA se omite el filtro: se usa una fecha muy antigua.
+    SIN_LIMITE_DESDE = "2000-01-01T00:00:00Z"
+
     def get_context_snapshot(
         self,
-        records_limit: int = 200,
+        records_limit: Optional[int] = None,
         days_back: int = 90,
     ) -> Dict[str, Any]:
         """
         Extrae un snapshot completo y enriquecido de los datos de Wallet.
 
         Args:
-            records_limit: Número máximo de registros a obtener (1-200 por página,
-                           se pagina automáticamente si hay más).
+            records_limit: Tope TOTAL de registros. None = sin tope (se pagina
+                           hasta agotar). Se pagina completo y luego se trunca;
+                           nunca se corta la paginación a mitad.
             days_back:     Ventana temporal en días hacia atrás para los registros
-                           (por defecto 90 días). Usar 0 para sin límite.
+                           (por defecto 90 días). 0 = histórico completo, que se
+                           implementa con un piso de fecha explícito, no omitiendo
+                           el filtro.
 
         Returns:
             Diccionario con snapshot completo incluyendo metadata.
+
+        Raises:
+            RuntimeError: si la API falla tras los reintentos.
         """
-        logger.info("📊 Iniciando extracción completa desde BudgetBakers Wallet API…")
+        logger.info("Iniciando extracción de BudgetBakers Wallet API…")
         extraction_start = ahora_colombia()
 
         # ── 1. Cuentas ───────────────────────────────────────────────────────
         accounts_raw = self._get_paginated("accounts", "accounts")
-        logger.info("   ✓ Cuentas: %d obtenidas", len(accounts_raw))
+        logger.info("   [+] Cuentas: %d obtenidas", len(accounts_raw))
 
         # ── 2. Categorías ────────────────────────────────────────────────────
         categories_raw = self._get_paginated("categories", "categories")
-        logger.info("   ✓ Categorías: %d obtenidas", len(categories_raw))
+        logger.info("   [+] Categorías: %d obtenidas", len(categories_raw))
 
         # ── 3. Etiquetas ─────────────────────────────────────────────────────
         labels_raw = self._get_paginated("labels", "labels")
-        logger.info("   ✓ Etiquetas: %d obtenidas", len(labels_raw))
+        logger.info("   [+] Etiquetas: %d obtenidas", len(labels_raw))
 
-        # ── 4. Registros (con filtro de fecha configurable) ──────────────────
-        record_params: Dict[str, Any] = {}
+        # ── 4. Registros (recordDate SIEMPRE presente) ───────────────────────
         if days_back > 0:
-            since = (extraction_start - timedelta(days=days_back)).strftime("%Y-%m-%dT%H:%M:%SZ")
-            record_params["recordDate"] = f"gte.{since}"
-            logger.info("   → Filtrando registros desde %s (%d días atrás)", since, days_back)
+            since = (extraction_start - timedelta(days=days_back)).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+            ventana_descripcion = f"últimos {days_back} días"
+        else:
+            since = self.SIN_LIMITE_DESDE
+            ventana_descripcion = "histórico completo"
 
-        # Si el caller pide < MAX_PAGE_SIZE, respetar ese límite máximo total
-        if records_limit < self.MAX_PAGE_SIZE:
-            record_params["limit"] = records_limit
+        record_params: Dict[str, Any] = {"recordDate": f"gte.{since}"}
+        logger.info("   -> Registros desde %s (%s)", since, ventana_descripcion)
 
-        records_raw = self._get_paginated("records", "records", extra_params=record_params)
-        # Truncar si se solicitó un límite explícito
-        if records_limit < len(records_raw):
-            records_raw = records_raw[:records_limit]
-        logger.info("   ✓ Registros: %d obtenidos", len(records_raw))
+        records_raw = self._get_paginated(
+            "records", "records", extra_params=record_params, max_records=records_limit
+        )
+        logger.info("   [+] Registros: %d obtenidos", len(records_raw))
 
         # ── 5. Construir mapas de lookup ─────────────────────────────────────
         account_map, category_map, label_map = self._build_lookup_maps(
@@ -687,15 +816,25 @@ class WalletContextExtractor:
         }
 
         # ── 8. Snapshot final ─────────────────────────────────────────────────
+        # `tipo_extraccion` refleja la ventana realmente usada, para que no haya
+        # incoherencia entre la metadata del envelope y la del snapshot.
+        tipo_extraccion = "full" if days_back <= 0 else "ventana"
+
         snapshot = {
             "metadata": {
-                "version": "3.0.0",
+                "version": "3.1.0",
                 "extraccion_timestamp": extraction_start.isoformat(),
                 "extraccion_duracion_segundos": round(duration, 2),
                 "ventana_dias": days_back,
-                "tipo_extraccion": "full",
+                "ventana_desde": since,
+                "ventana_descripcion": ventana_descripcion,
+                "tipo_extraccion": tipo_extraccion,
+                "records_limit": records_limit,
+                "registros_solicitados_tope": records_limit,
                 "api_base_url": self.BASE_URL,
                 "api_version": "1.3.0",
+                "paginacion": "nextOffset",
+                "max_page_size": self.MAX_PAGE_SIZE,
             },
             "cuentas": cuentas,
             "categorias": categorias,
@@ -704,7 +843,7 @@ class WalletContextExtractor:
             "estadisticas": estadisticas,
         }
 
-        logger.info("✅ Extracción finalizada en %.2f s", duration)
+        logger.info("Extracción finalizada en %.2f s", duration)
         return snapshot
 
 
@@ -712,61 +851,77 @@ class WalletContextExtractor:
 # PUNTO DE ENTRADA
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _fmt_cop(valor: float) -> str:
+    """Formato es-CO: separador de miles '.', decimal ','."""
+    signo = "-" if valor < 0 else ""
+    cuerpo = f"{abs(valor):,.2f}".replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+    return f"{signo}{cuerpo}"
+
+
 if __name__ == "__main__":
     TOKEN = os.getenv("WALLET_API_TOKEN")
 
     if not TOKEN:
         logger.error(
             "La variable WALLET_API_TOKEN no está configurada en .env\n"
-            "Agrega: WALLET_API_TOKEN=tu_token_aquí"
+            "Agrega: WALLET_API_TOKEN=tu_token_aqui"
         )
-    else:
-        extractor = WalletContextExtractor(TOKEN)
+        sys.exit(1)
 
-        # Configurable vía variables de entorno en .env o docker-compose.yml:
-        #   RECORDS_LIMIT=200   → número máximo de registros (default: 200)
-        #   DAYS_BACK=90        → ventana temporal en días (0 = sin límite, default: 90)
-        records_limit = int(os.getenv("RECORDS_LIMIT", 200))
-        days_back = int(os.getenv("DAYS_BACK", 90))
+    extractor = WalletContextExtractor(TOKEN)
 
-        snapshot_data = extractor.get_context_snapshot(records_limit=records_limit, days_back=days_back)
+    # Configurable vía .env o docker-compose.yml:
+    #   RECORDS_LIMIT=200   -> tope total de registros (0 o vacío = sin tope)
+    #   DAYS_BACK=90        -> ventana en días (0 = histórico completo)
+    records_limit_env = os.getenv("RECORDS_LIMIT", "0").strip()
+    records_limit = int(records_limit_env) if records_limit_env else 0
+    records_limit_arg = records_limit if records_limit > 0 else None
+    days_back = int(os.getenv("DAYS_BACK", 90))
 
-        output_dir = "output"
-        os.makedirs(output_dir, exist_ok=True)
-        output_path = os.path.join(output_dir, "snapshot_wallet.json")
+    try:
+        snapshot_data = extractor.get_context_snapshot(
+            records_limit=records_limit_arg, days_back=days_back
+        )
+    except RuntimeError as exc:
+        logger.error("Extracción abortada: %s", exc)
+        sys.exit(1)
 
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(snapshot_data, f, indent=4, ensure_ascii=False)
+    output_dir = "output"
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, "snapshot_wallet.json")
 
-        stats = snapshot_data["estadisticas"]
-        meta = snapshot_data["metadata"]
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(snapshot_data, f, indent=4, ensure_ascii=False)
 
-        print(f"\n💾 Snapshot guardado en '{output_path}'")
-        print(f"\n📊 RESUMEN DE EXTRACCIÓN (v{meta['version']})")
-        print(f"   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        print(f"   📁 Cuentas activas        : {stats['total_cuentas']}")
-        print(f"   🏷️  Categorías             : {stats['total_categorias']}")
-        print(f"   🔖 Etiquetas              : {stats['total_etiquetas']}")
-        print(f"   📝 Registros extraídos    : {stats['total_registros']}")
-        print(f"   ── Ingresos               : {stats['registros_ingreso']}")
-        print(f"   ── Gastos                 : {stats['registros_gasto']}")
-        print(f"   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        print(f"   ✨ Con etiquetas           : {stats['registros_con_etiquetas']}")
-        print(f"   ⚠️  Sin categoría          : {stats['registros_sin_categoria']}")
-        print(f"   🏦 Con contraparte        : {stats['registros_con_contraparte']}")
-        print(f"   🔄 Transferencias         : {stats['registros_transferencia']}")
-        print(f"   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        print(f"   💵 Ingresos COP           : ${stats['suma_ingresos_cop']:,.0f}")
-        print(f"   💸 Gastos COP             : ${stats['suma_gastos_cop']:,.0f}")
-        print(f"   📈 Balance neto COP       : ${stats['balance_neto_cop']:,.0f}")
-        print(f"   💵 Ingresos USD           : ${stats['suma_ingresos_usd']:,.2f}")
-        print(f"   💸 Gastos USD             : ${stats['suma_gastos_usd']:,.2f}")
-        print(f"   📈 Balance neto USD       : ${stats['balance_neto_usd']:,.2f}")
-        if stats.get("tasa_usd_cop"):
-            print(f"   💱 Tasa USD→COP           : ${stats['tasa_usd_cop']:,.2f}")
-            print(f"   🌐 Balance global COP     : ${stats['balance_neto_global_cop']:,.0f}")
-        print(f"   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        print(f"   ⏱️  Duración               : {meta['extraccion_duracion_segundos']:.2f} s")
-        print(f"   📅 Ventana temporal       : últimos {meta['ventana_dias']} días")
-        print(f"\n✅ Snapshot v{meta['version']} generado exitosamente")
-        print(f"   Timestamp: {meta['extraccion_timestamp']}")
+    stats = snapshot_data["estadisticas"]
+    meta = snapshot_data["metadata"]
+
+    print(f"\nSnapshot guardado en '{output_path}'")
+    print(f"\nRESUMEN DE EXTRACCION (v{meta['version']})")
+    print("   " + "-" * 50)
+    print(f"   Cuentas activas        : {stats['total_cuentas']}")
+    print(f"   Categorias             : {stats['total_categorias']}")
+    print(f"   Etiquetas              : {stats['total_etiquetas']}")
+    print(f"   Registros extraidos    : {stats['total_registros']}")
+    print(f"   -- Ingresos            : {stats['registros_ingreso']}")
+    print(f"   -- Gastos              : {stats['registros_gasto']}")
+    print("   " + "-" * 50)
+    print(f"   Con etiquetas          : {stats['registros_con_etiquetas']}")
+    print(f"   Sin categoria          : {stats['registros_sin_categoria']}")
+    print(f"   Con contraparte        : {stats['registros_con_contraparte']}")
+    print(f"   Transferencias         : {stats['registros_transferencia']}")
+    print("   " + "-" * 50)
+    print(f"   Ingresos COP           : {_fmt_cop(stats['suma_ingresos_cop'])}")
+    print(f"   Gastos COP             : {_fmt_cop(stats['suma_gastos_cop'])}")
+    print(f"   Balance neto COP       : {_fmt_cop(stats['balance_neto_cop'])}")
+    print(f"   Ingresos USD           : {stats['suma_ingresos_usd']:,.2f}")
+    print(f"   Gastos USD             : {stats['suma_gastos_usd']:,.2f}")
+    print(f"   Balance neto USD       : {stats['balance_neto_usd']:,.2f}")
+    if stats.get("tasa_usd_cop"):
+        print(f"   Tasa USD->COP          : {_fmt_cop(stats['tasa_usd_cop'])}")
+        print(f"   Balance global COP     : {_fmt_cop(stats.get('balance_neto_global_cop', stats['balance_neto_cop']))}")
+    print("   " + "-" * 50)
+    print(f"   Duracion               : {meta['extraccion_duracion_segundos']:.2f} s")
+    print(f"   Ventana                : {meta['ventana_descripcion']} (desde {meta['ventana_desde']})")
+    print(f"\nSnapshot v{meta['version']} generado exitosamente")
+    print(f"   Timestamp: {meta['extraccion_timestamp']}")

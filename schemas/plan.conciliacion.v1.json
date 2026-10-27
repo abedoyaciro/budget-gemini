@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plan.conciliacion.v1.json",
+  "title": "Plan de conciliación de cuenta (v1)",
+  "description": "Contrato de entrada de src/conciliar_cuenta.py. Lo construye el agente tras leer las capturas del banco con visión y comparar contra Wallet.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "cuenta"],
+  "properties": {
+    "version": {
+      "const": "plan.conciliacion.v1",
+      "description": "Versión del esquema. Obligatoria para evitar planes de formato desconocido."
+    },
+    "cuenta": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Nombre de la cuenta en Wallet (coincidencia exacta o parcial, case-insensitive)."
+    },
+    "banco": {
+      "type": "string",
+      "description": "Nombre del banco según la captura. Solo informativo."
+    },
+    "moneda": {
+      "type": "string",
+      "default": "COP",
+      "description": "Código ISO 4217 esperado en la cuenta."
+    },
+    "tolerancia": {
+      "type": "number",
+      "minimum": 0,
+      "default": 0.01,
+      "description": "Tolerancia en unidades de moneda para comparar saldos (captura vs Wallet). Se declara explícitamente; 0 exige coincidencia exacta."
+    },
+    "since_date": {
+      "type": "string",
+      "description": "ISO 8601. Fecha desde la que se leen registros de Wallet. Si se omite, se usa el primer movimiento de la captura menos 31 días. NUNCA se lee sin recordDate."
+    },
+    "captura": {
+      "type": "object",
+      "description": "Datos extraídos de las capturas del banco.",
+      "additionalProperties": false,
+      "required": ["saldo_final"],
+      "properties": {
+        "fecha": { "type": "string", "description": "Fecha de la captura (YYYY-MM-DD)." },
+        "saldo_final": {
+          "type": "number",
+          "description": "Saldo actual mostrado por el banco. Es la referencia de verificación."
+        },
+        "saldo_corrido": {
+          "type": "array",
+          "description": "Saldos corridos por movimiento, tal como los muestra la captura. Permiten validar movimiento por movimiento y detectar registros mal fechados o traslapes.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["fecha", "saldo"],
+            "properties": {
+              "fecha": { "type": "string" },
+              "saldo": { "type": "number" }
+            }
+          }
+        },
+        "movimientos": {
+          "type": "array",
+          "description": "Todos los movimientos visibles en la captura, incluidos los que ya existen en Wallet.",
+          "items": { "$ref": "#/$defs/movimiento" }
+        }
+      }
+    },
+    "crear_registros": {
+      "type": "array",
+      "description": "Registros que faltan en Wallet y deben crearse.",
+      "items": { "$ref": "#/$defs/movimiento" }
+    },
+    "transferencias": {
+      "type": "array",
+      "description": "Movimientos que son transferencias entre cuentas propias.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fecha", "monto", "cuenta_contraparte"],
+        "properties": {
+          "fecha": { "type": "string" },
+          "monto": { "type": "number" },
+          "concepto": { "type": "string" },
+          "cuenta_contraparte": {
+            "type": "string",
+            "description": "Nombre de la cuenta contraparte en Wallet (ej. Lulo)."
+          },
+          "crear_espejo": {
+            "type": "boolean",
+            "default": false,
+            "description": "Crear el registro espejo en la cuenta contraparte. La captura suele mostrar un solo lado del par: solo se crea si el usuario lo pide Y se verificó que el espejo no existe."
+          }
+        }
+      }
+    },
+    "ajuste_apertura": {
+      "type": "object",
+      "description": "Corrección de initialBalance por residual originado antes de la ventana. Requiere explicación y confirmación explícita adicional.",
+      "additionalProperties": false,
+      "required": ["initial_balance_objetivo", "explicacion"],
+      "properties": {
+        "initial_balance_objetivo": { "type": "number" },
+        "explicacion": { "type": "string", "minLength": 10 },
+        "confirmar": {
+          "type": "boolean",
+          "default": false,
+          "description": "Debe ser true para aplicar. Sin esto, el ajuste solo se reporta como propuesta."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "movimiento": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fecha", "monto", "concepto"],
+      "properties": {
+        "fecha": {
+          "type": "string",
+          "description": "ISO 8601 (YYYY-MM-DD o con hora)."
+        },
+        "monto": {
+          "type": "number",
+          "description": "Positivo = ingreso, negativo = gasto. En la moneda de la cuenta."
+        },
+        "concepto": {
+          "type": "string",
+          "description": "Texto tal como aparece en la captura (ej. 'Intereses, dividendos')."
+        },
+        "category_system_id": {
+          "type": "string",
+          "description": "systemId de la categoría en Wallet (ej. income__interest_dividends). Se resuelve a categoryId en runtime; si no existe, se aborta."
+        },
+        "category_nombre": {
+          "type": "string",
+          "description": "Alternativa: nombre exacto de la categoría en Wallet. Si no hay coincidencia exacta, se aborta."
+        },
+        "contraparte": {
+          "type": "string",
+          "description": "counterParty (comercio o persona)."
+        },
+        "label_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "saldo_corrido": {
+          "type": "number",
+          "description": "Saldo después de este movimiento según el banco."
+        }
+      }
+    }
+  }
+}

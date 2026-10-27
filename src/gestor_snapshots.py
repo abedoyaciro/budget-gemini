@@ -13,6 +13,7 @@ Versión: 1.0
 """
 
 import os
+import sys
 import json
 import logging
 import shutil
@@ -26,6 +27,15 @@ from logging_config import setup_logging, ahora_colombia
 
 
 logger = setup_logging(__name__)
+
+# Windows: cp1252 no codifica emoji ni box-drawing. Sin esto, un print() final
+# convertía una extracción exitosa en exit code 1 con los datos ya guardados.
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # pragma: no cover
+        pass
 
 # ── Rutas base ────────────────────────────────────────────────────────────────
 OUTPUT_DIR = "output"
@@ -166,22 +176,30 @@ def guardar_snapshot(
 
     if cambios:
         logger.info(
-            "   📊 Cambios detectados → %d nuevos registros, %d modificados, "
-            "%d nuevas categorías, %d nuevas etiquetas",
+            "   [+] Cambios detectados -> %d nuevos registros, %d modificados, "
+            "%d nuevas categorias, %d nuevas etiquetas",
             cambios["nuevos_registros"],
             cambios["registros_modificados"],
             cambios["nuevas_categorias"],
             cambios["nuevas_etiquetas"],
         )
     else:
-        logger.info("   📊 Sin snapshot anterior — extracción inicial")
+        logger.info("   [+] Sin snapshot anterior - extraccion inicial")
 
     # ── Construir envelope de gestión ────────────────────────────────────────
+    # `tipo_extraccion` debe coincidir con el que declara la metadata del data:
+    # si el envelope dice "incremental" y el data dice "full" (o al revés),
+    # el historial miente sobre la ventana realmente extraída.
+    meta_datos = datos.get("metadata", {})
+    tipo_efectivo = meta_datos.get("tipo_extraccion") or tipo_extraccion
+
     envelope = {
         "metadata_gestion": {
             "timestamp": ahora_colombia().isoformat(),
-            "tipo_extraccion": tipo_extraccion,
-            "ventana_dias": datos.get("metadata", {}).get("ventana_dias"),
+            "tipo_extraccion": tipo_efectivo,
+            "ventana_dias": meta_datos.get("ventana_dias"),
+            "ventana_desde": meta_datos.get("ventana_desde"),
+            "ventana_descripcion": meta_datos.get("ventana_descripcion"),
             "snapshot_anterior": snapshot_anterior_nombre,
             "cambios_detectados": cambios or {
                 "nuevos_registros": len(datos.get("registros", [])),
@@ -197,14 +215,14 @@ def guardar_snapshot(
     # ── Guardar snapshot con timestamp ───────────────────────────────────────
     with open(ruta_nueva, "w", encoding="utf-8") as f:
         json.dump(envelope, f, indent=4, ensure_ascii=False)
-    logger.info("   💾 Snapshot guardado: snapshots/%s", nombre_archivo)
+    logger.info("   [+] Snapshot guardado: snapshots/%s", nombre_archivo)
 
     # ── Actualizar snapshot_wallet.json (compatibilidad con analizador) ───────
     # El analizador lee output/snapshot_wallet.json directamente; le pasamos
     # el contenido plano (la sección "data") para no romper compatibilidad.
     with open(SNAPSHOT_LATEST, "w", encoding="utf-8") as f:
         json.dump(datos, f, indent=4, ensure_ascii=False)
-    logger.info("   🔗 snapshot_wallet.json actualizado (compatibilidad)")
+    logger.info("   [+] snapshot_wallet.json actualizado (compatibilidad)")
 
     return ruta_nueva
 
@@ -251,6 +269,13 @@ def listar_historial() -> list[Dict[str, Any]]:
     return historial
 
 
+def _fmt_cop(valor: float) -> str:
+    """Formato es-CO: separador de miles '.', decimal ','."""
+    signo = "-" if valor < 0 else ""
+    cuerpo = f"{abs(valor):,.2f}".replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+    return f"{signo}{cuerpo}"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # PUNTO DE ENTRADA — extrae + guarda snapshot en un solo comando
 # ─────────────────────────────────────────────────────────────────────────────
@@ -272,13 +297,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--limit",
         type=int,
-        default=int(os.getenv("RECORDS_LIMIT", 200)),
-        help="Número máximo de registros a obtener (default: 200).",
+        default=int(os.getenv("RECORDS_LIMIT", "0") or 0),
+        help="Tope TOTAL de registros (0 = sin tope, se pagina hasta agotar).",
     )
     parser.add_argument(
         "--full",
         action="store_true",
-        help="Extracción completa (ignora --days, usa days=0).",
+        help="Histórico completo (equivale a --days 0).",
     )
     parser.add_argument(
         "--historial",
@@ -291,17 +316,18 @@ if __name__ == "__main__":
     if args.historial:
         historial = listar_historial()
         if not historial:
-            print("📭 No hay snapshots guardados todavía.")
+            print("No hay snapshots guardados todavia.")
         else:
-            print(f"\n📚 HISTORIAL DE SNAPSHOTS ({len(historial)} disponibles)")
-            print("   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            print(f"\nHISTORIAL DE SNAPSHOTS ({len(historial)} disponibles)")
+            print("   " + "-" * 50)
             for entry in reversed(historial):  # más reciente primero
                 cambios = entry.get("cambios_detectados") or {}
-                print(f"   📁 {entry['archivo']}")
-                print(f"      Timestamp  : {entry['timestamp']}")
-                print(f"      Tipo       : {entry['tipo_extraccion']}")
-                print(f"      Registros  : {entry['total_registros']}")
-                print(f"      Nuevos     : {cambios.get('nuevos_registros', '?')}")
+                print(f"   {entry['archivo']}")
+                print(f"      Timestamp     : {entry['timestamp']}")
+                print(f"      Tipo          : {entry['tipo_extraccion']}")
+                print(f"      Ventana       : dias={entry['ventana_dias']}")
+                print(f"      Registros     : {entry['total_registros']}")
+                print(f"      Nuevos        : {cambios.get('nuevos_registros', '?')}")
                 print()
         raise SystemExit(0)
 
@@ -309,45 +335,50 @@ if __name__ == "__main__":
     TOKEN = os.getenv("WALLET_API_TOKEN")
     if not TOKEN:
         logger.error(
-            "La variable WALLET_API_TOKEN no está configurada en .env\n"
-            "Agrega: WALLET_API_TOKEN=tu_token_aquí"
+            "La variable WALLET_API_TOKEN no esta configurada en .env\n"
+            "Agrega: WALLET_API_TOKEN=tu_token_aqui"
         )
         raise SystemExit(1)
 
     days = 0 if args.full else args.days
-    tipo = "full" if args.full or days == 0 else "incremental"
+    limite = args.limit if args.limit and args.limit > 0 else None
 
     logger.info(
-        "🚀 Iniciando extracción %s | días=%d | límite=%d",
-        tipo.upper(), days, args.limit,
+        "Iniciando extraccion | dias=%d | tope_registros=%s",
+        days, limite if limite is not None else "sin tope",
     )
 
     extractor = WalletContextExtractor(TOKEN)
-    datos = extractor.get_context_snapshot(records_limit=args.limit, days_back=days)
-    ruta = guardar_snapshot(datos, tipo_extraccion=tipo)
+    try:
+        datos = extractor.get_context_snapshot(records_limit=limite, days_back=days)
+    except RuntimeError as exc:
+        logger.error("Extraccion abortada (no se guardo snapshot parcial): %s", exc)
+        raise SystemExit(1)
+
+    ruta = guardar_snapshot(datos)
 
     stats = datos["estadisticas"]
     meta = datos["metadata"]
 
-    print(f"\n📊 RESUMEN DE EXTRACCIÓN (v{meta['version']})")
-    print(f"   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    print(f"   📁 Cuentas          : {stats['total_cuentas']}")
-    print(f"   🏷️  Categorías       : {stats['total_categorias']}")
-    print(f"   🔖 Etiquetas        : {stats['total_etiquetas']}")
-    print(f"   📝 Registros        : {stats['total_registros']}")
-    print(f"   ── Ingresos         : {stats['registros_ingreso']}")
-    print(f"   ── Gastos           : {stats['registros_gasto']}")
-    print(f"   📅 Ventana          : últimos {meta['ventana_dias']} días")
-    print(f"   ⏱️  Duración         : {meta['extraccion_duracion_segundos']:.2f} s")
-    print(f"   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    print(f"   💵 Ingresos COP     : ${stats['suma_ingresos_cop']:,.0f}")
-    print(f"   💸 Gastos COP       : ${stats['suma_gastos_cop']:,.0f}")
-    print(f"   📈 Balance neto COP : ${stats['balance_neto_cop']:,.0f}")
-    print(f"   💵 Ingresos USD     : ${stats.get('suma_ingresos_usd', 0):,.2f}")
-    print(f"   💸 Gastos USD       : ${stats.get('suma_gastos_usd', 0):,.2f}")
-    print(f"   📈 Balance neto USD : ${stats.get('balance_neto_usd', 0):,.2f}")
+    print(f"\nRESUMEN DE EXTRACCION (v{meta['version']})")
+    print("   " + "-" * 50)
+    print(f"   Cuentas        : {stats['total_cuentas']}")
+    print(f"   Categorias     : {stats['total_categorias']}")
+    print(f"   Etiquetas      : {stats['total_etiquetas']}")
+    print(f"   Registros      : {stats['total_registros']}")
+    print(f"   -- Ingresos    : {stats['registros_ingreso']}")
+    print(f"   -- Gastos      : {stats['registros_gasto']}")
+    print(f"   Ventana        : {meta['ventana_descripcion']} (desde {meta['ventana_desde']})")
+    print(f"   Duracion       : {meta['extraccion_duracion_segundos']:.2f} s")
+    print("   " + "-" * 50)
+    print(f"   Ingresos COP   : {_fmt_cop(stats['suma_ingresos_cop'])}")
+    print(f"   Gastos COP     : {_fmt_cop(stats['suma_gastos_cop'])}")
+    print(f"   Balance COP    : {_fmt_cop(stats['balance_neto_cop'])}")
+    print(f"   Ingresos USD   : {stats.get('suma_ingresos_usd', 0):,.2f}")
+    print(f"   Gastos USD     : {stats.get('suma_gastos_usd', 0):,.2f}")
+    print(f"   Balance USD    : {stats.get('balance_neto_usd', 0):,.2f}")
     if stats.get("tasa_usd_cop"):
-        print(f"   💱 Tasa USD→COP     : ${stats['tasa_usd_cop']:,.2f}")
-        print(f"   🌐 Balance global   : ${stats.get('balance_neto_global_cop', stats['balance_neto_cop']):,.0f} COP")
-    print(f"\n✅ Snapshot guardado en: {ruta}")
-    print(f"   snapshot_wallet.json actualizado para el analizador")
+        print(f"   Tasa USD->COP  : {_fmt_cop(stats['tasa_usd_cop'])}")
+        print(f"   Balance global : {_fmt_cop(stats.get('balance_neto_global_cop', stats['balance_neto_cop']))}")
+    print(f"\nSnapshot guardado en: {ruta}")
+    print("snapshot_wallet.json actualizado para el analizador")

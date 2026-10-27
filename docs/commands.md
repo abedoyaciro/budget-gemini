@@ -1,175 +1,125 @@
-# Comandos Docker — Referencia Rápida
+# Comandos — budget-gemini
 
-## 🏗️ Construir la imagen
+## Runner nativo (Windows, sin Docker)
 
-Solo necesario la primera vez o cuando cambies código / `requirements.txt` / `Dockerfile`:
+`make` no viene instalado por defecto en Windows y el Makefile dependía de
+Docker. Usa el runner en PowerShell:
+
+```powershell
+.\scripts\budget.ps1 help
+```
+
+| Comando | Descripción |
+|---------|-------------|
+| `budget.ps1 snapshot [-Days 90] [-Limit 0]` | Extrae datos de Wallet |
+| `budget.ps1 analyze` | Diagnóstico con Gemini |
+| `budget.ps1 learn` | Aprende reglas contables |
+| `budget.ps1 enrich` | Enriquece notas y etiquetas |
+| `budget.ps1 confirm` | Confirma reglas (interactivo) |
+| `budget.ps1 dashboard` | Genera `output/dashboard.html` |
+| `budget.ps1 historial` | Historial de snapshots |
+| `budget.ps1 reglas` | Reglas aprendidas |
+| `budget.ps1 pipeline` | snapshot + analyze |
+| `budget.ps1 full` | snapshot + analyze + learn + enrich |
+| `budget.ps1 reconcile -Plan plan.json [-DryRun] [-Yes]` | Concilia una cuenta |
+| `budget.ps1 ajustar -Cuenta X -InitialBalance N -Delta N -Explicacion "..." [-DryRun]` | Ajuste de partida de apertura |
+| `budget.ps1 test` | Suite de tests |
+
+El runner aplica automáticamente:
+
+```
+PYTHONUTF8=1
+PYTHONIOENCODING=utf-8
+PYTHONPATH=src
+```
+
+Sin eso, `print()` con emoji revienta con `UnicodeEncodeError` en cp1252 y una
+extracción exitosa termina con exit code 1.
+
+## Make (Docker o nativo)
+
+`make` detecta el daemon de Docker. Si responde, ejecuta en contenedor; si no,
+cae a modo nativo con `PYTHONPATH=src`.
 
 ```bash
-docker-compose build
+make doctor        # comprueba entorno y modo activo
+make snapshot      # DAYS=90
+make snapshot DAYS=0 LIMIT=0    # histórico completo, sin tope
+make analyze
+make learn
+make enrich
+make confirm
+make dashboard
+make pipeline
+make full
+make reconcile PLAN=plan.json DRY=1
+make reconcile PLAN=plan.json YES=1
+make ajustar CUENTA=Pibank INITIAL=2580398.47 DELTA=2580400.24 \
+             EXPLICACION="Residual de apertura pre-ventana" DRY=1
+make historial
+make reglas
+make logs
+make test
+make clean
 ```
 
-Equivalente manual:
-```bash
-docker build -t budget-gemini-app .
+## Variables
+
+| Variable | Significado |
+|----------|-------------|
+| `DAYS` / `DAYS_BACK` | Días hacia atrás. `0` = histórico completo (usa piso de fecha, **no** omite `recordDate`) |
+| `LIMIT` / `RECORDS_LIMIT` | Tope **total** de registros. `0` = sin tope |
+| `MAX_REG` | Registros enviados al aprendizaje de reglas |
+| `TEMPERATURA` | Temperatura de Gemini |
+| `PLAN` | Ruta del plan de conciliación |
+| `DRY` / `DRY=1` | Solo reporta, no escribe |
+| `YES` / `YES=1` | No volver a pedir confirmación |
+
+## Conciliación
+
+```powershell
+# 1. Histórico completo (necesario para conciliar)
+.\scripts\budget.ps1 snapshot -Days 0 -Limit 0
+
+# 2. Construir el plan (esquema: schemas/plan.conciliacion.v1.json)
+#    Ejemplo real: plans/plan_conciliacion_pibank.json
+
+# 3. Ver el reporte sin escribir nada
+.\scripts\budget.ps1 reconcile -Plan plans/plan_conciliacion_pibank.json -DryRun
+
+# 4. Aplicar tras aprobación humana
+.\scripts\budget.ps1 reconcile -Plan plans/plan_conciliacion_pibank.json -Yes
 ```
 
----
+## Ajuste de partida de apertura
 
-## 🚀 Servicios disponibles (docker-compose)
+Solo para residuales originados **antes** de la ventana de conciliación.
 
-### Extracción con histórico — uso normal
+```powershell
+# Propuesta
+.\scripts\budget.ps1 ajustar -Cuenta Pibank -InitialBalance 2580398.47 `
+    -Delta 2580400.24 -Explicacion "Residual de apertura pre-ventana" -DryRun
 
-```bash
-# Extrae datos y guarda en output/snapshots/ con timestamp y detección de cambios
-docker-compose up budget-snapshot
-
-# Reconstruir imagen y ejecutar snapshot
-docker-compose up --build budget-snapshot
+# Aplicar (pide confirmación; no existe --auto)
+.\scripts\budget.ps1 ajustar -Cuenta Pibank -InitialBalance 2580398.47 `
+    -Delta 2580400.24 -Explicacion "Residual de apertura pre-ventana"
 ```
 
-### Ver historial de snapshots
-
-```bash
-docker-compose up budget-historial
-```
-
-### Extracción simple (sin histórico)
-
-```bash
-# Sobreescribe output/snapshot_wallet.json directamente
-docker-compose up budget-extractor
-```
-
-### Análisis con Gemini AI
-
-```bash
-# Requiere output/snapshot_wallet.json — ejecutar snapshot primero
-docker-compose up budget-analyzer
-```
-
-### Prueba de conectividad Gemini
-
-```bash
-docker-compose --profile test run --rm gemini-test
-```
-
----
-
-## ⚙️ Parámetros configurables (sin rebuild)
-
-### Vía variables de entorno en `.env` o `-e`
-
-```bash
-# Últimos 30 días, máx 150 registros
-DAYS_BACK=30 RECORDS_LIMIT=150 docker-compose up budget-snapshot
-```
-
-### Vía argumentos CLI al contenedor
-
-```bash
-# Extracción completa (sin filtro de fecha)
-docker-compose run --rm budget-snapshot python src/gestor_snapshots.py --full
-
-# Últimos 7 días
-docker-compose run --rm budget-snapshot python src/gestor_snapshots.py --days 7
-
-# Últimos 14 días, máx 100 registros
-docker-compose run --rm budget-snapshot python src/gestor_snapshots.py --days 14 --limit 100
-```
-
----
-
-## 🐳 Equivalentes con docker run
+## Docker
 
 ```bash
-# Snapshot con histórico
-docker run --rm --env-file .env -v ${PWD}/output:/app/output budget-gemini-app \
-  python src/gestor_snapshots.py --days 90
-
-# Extracción simple
-docker run --rm --env-file .env -v ${PWD}/output:/app/output budget-gemini-app \
-  python src/extractor_wallet.py
-
-# Análisis con Gemini
-docker run --rm --env-file .env -v ${PWD}/output:/app/output budget-gemini-app \
-  python src/analizador_finanzas.py
-
-# Historial de snapshots
-docker run --rm --env-file .env -v ${PWD}/output:/app/output budget-gemini-app \
-  python src/gestor_snapshots.py --historial
-
-# Prueba de Gemini
-docker run --rm --env-file .env budget-gemini-app python tests/prueba_gemini.py
+docker compose run --rm budget-pipeline
+docker compose run --rm budget-pipeline --full
+docker compose up budget-confirmar-reglas    # interactivo (requiere TTY)
 ```
 
-**Windows PowerShell:** sustituye `\` por `` ` ``.
+## Solución de problemas
 
----
-
-## 📝 Descripción de módulos
-
-### `src/gestor_snapshots.py` ⭐ Principal
-
-Extrae datos de la API y gestiona el histórico de snapshots con detección de cambios.
-
-```text
-Argumentos:
-  --days N      Días hacia atrás (default: $DAYS_BACK o 90)
-  --limit N     Máx registros (default: $RECORDS_LIMIT o 200)
-  --full        Sin filtro de fecha (toda la historia)
-  --historial   Solo muestra snapshots guardados y sale
-```
-
-### `src/extractor_wallet.py`
-
-Extracción directa, sin gestión de histórico. Útil para pruebas rápidas.
-
-### `src/analizador_finanzas.py`
-
-Genera diagnóstico financiero con Gemini AI (Structured Outputs). Lee `output/snapshot_wallet.json`.
-
-### `tests/prueba_gemini.py`
-
-Verifica la conexión con la Interactions API de Gemini.
-
----
-
-## 🔧 Comandos útiles
-
-```bash
-# Ver logs de un servicio en tiempo real
-docker-compose logs -f budget-snapshot
-
-# Abrir shell dentro del contenedor (debug)
-docker run -it --rm --env-file .env -v ${PWD}/output:/app/output budget-gemini-app /bin/bash
-
-# Ver imágenes disponibles
-docker images
-
-# Limpiar imágenes sin usar
-docker image prune -a
-
-# Limpiar todo (imágenes, contenedores, volúmenes)
-docker system prune -a --volumes
-
-# Verificar que .env se carga correctamente
-docker run --rm --env-file .env budget-gemini-app env | grep -E "GEMINI|WALLET|RECORDS|DAYS"
-# Windows PowerShell:
-docker run --rm --env-file .env budget-gemini-app env | Select-String -Pattern "GEMINI|WALLET|RECORDS|DAYS"
-```
-
----
-
-## 🔍 Ver modelos de Gemini disponibles
-
-```python
-# Crea un archivo temporal modelos.py
-from google import genai
-client = genai.Client()
-for model in client.models.list():
-    print(model.name)
-```
-
-```bash
-docker run --rm --env-file .env -v ${PWD}:/app budget-gemini-app python modelos.py
-```
+| Error | Causa | Solución |
+|-------|-------|----------|
+| `WALLET_API_TOKEN no configurado` | Falta `.env` | Copia `.env.example` a `.env` |
+| `401 Unauthorized` | Token expirado | Genera uno nuevo en BudgetBakers |
+| `Errno 11001` / `10054` | DNS inestable | El cliente reintenta con backoff; si persiste, usa `--dns 8.8.8.8` en Docker |
+| `UnicodeEncodeError` | Consola cp1252 | Usa el runner (`budget.ps1`) o exporta `PYTHONUTF8=1` |
+| Cuenta con 0 registros | Ventana corta (`DAYS_BACK=90`) | Usa `DAYS=0` |
+| `JSON inválido` en plan | Falta `version` o campo desconocido | Revisa `schemas/plan.conciliacion.v1.json` |

@@ -1,135 +1,159 @@
-# ═══════════════════════════════════════════════════════════════════════════
-#  Makefile — Pipeline de Análisis Financiero Inteligente
-#  Autor: Anderson Bedoya Ciro
+# Makefile — Pipeline de Análisis Financiero Inteligente
+# Autor: Anderson Bedoya Ciro
 #
-#  Uso:
-#    make                  → muestra esta ayuda
-#    make build            → construye la imagen Docker
-#    make snapshot         → extrae datos de Wallet
-#    make analyze          → genera diagnóstico financiero
-#    make learn            → aprende reglas contables
-#    make enrich           → enriquece notas/etiquetas (automático)
-#    make confirm          → confirmar/rechazar/modificar reglas (interactivo)
-#    make pipeline         → snapshot + analyze  (uso semanal recomendado)
-#    make full             → snapshot + analyze + learn + enrich
-#    make historial        → muestra historial de snapshots
-#    make reglas           → muestra reglas aprendidas
-#    make logs             → muestra los logs del último pipeline
-# ═══════════════════════════════════════════════════════════════════════════
+# Este Makefile funciona con Docker y SIN Docker:
+#   * Si el daemon de Docker responde -> ejecuta en contenedor.
+#   * Si no -> ejecuta nativamente con Python (PYTHONPATH=src).
+#
+# En Windows, `make` no viene instalado por defecto. Usa el runner nativo:
+#   .\scripts\budget.ps1 help
+#   .\scripts\budget.ps1 snapshot -Days 0
+#   .\scripts\budget.ps1 reconcile -Plan plan.json
+#
+# Todas las invocaciones nativas fuerzan PYTHONUTF8=1 (cp1252 rompía los
+# print con emoji y convertía una extracción exitosa en exit code 1).
 
 .PHONY: help build snapshot analyze learn enrich confirm pipeline full \
-        historial reglas logs clean
+        dashboard historial reglas logs clean reconcile ajustar test doctor
 
-# Imagen Docker
 IMAGE := budget-gemini-app:latest
 
-# Variables configurables desde la línea de comando
+# Variables configurables
 DAYS        ?= $(or $(DAYS_BACK),90)
-LIMIT       ?= $(or $(RECORDS_LIMIT),200)
+LIMIT       ?= 0
 MAX_REG     ?= $(or $(APRENDIZAJE_MAX_REGISTROS),150)
 TEMPERATURA ?= $(or $(GEMINI_TEMPERATURA),0.3)
 
-# Flags base de docker run
-DOCKER_RUN := docker run --rm --dns 8.8.8.8 --env-file .env \
-               -e PYTHONPATH=/app/src \
-               -e DAYS_BACK=$(DAYS) \
-               -e RECORDS_LIMIT=$(LIMIT) \
-               -e APRENDIZAJE_MAX_REGISTROS=$(MAX_REG) \
-               -e GEMINI_TEMPERATURA=$(TEMPERATURA) \
-               -v "$(CURDIR)/output:/app/output" \
-               -v "$(CURDIR)/run_pipeline.py:/app/run_pipeline.py"
+# ── Detección de entorno ────────────────────────────────────────────────────
+# Si `docker info` falla (daemon apagado o docker ausente) se usa modo nativo.
+DOCKER_OK := $(shell docker info >/dev/null 2>&1 && echo yes || echo no)
 
-# Flags para servicios interactivos (necesitan TTY)
-DOCKER_RUN_TTY := docker run --rm -it --dns 8.8.8.8 --env-file .env \
-                   -e PYTHONPATH=/app/src \
-                   -v "$(CURDIR)/output:/app/output"
+ifeq ($(DOCKER_OK),yes)
+  MODE := docker
+  DOCKER_RUN := docker run --rm --dns 8.8.8.8 --env-file .env \
+                  -e PYTHONUTF8=1 \
+                  -e PYTHONPATH=/app/src \
+                  -e DAYS_BACK=$(DAYS) \
+                  -e RECORDS_LIMIT=$(LIMIT) \
+                  -e APRENDIZAJE_MAX_REGISTROS=$(MAX_REG) \
+                  -e GEMINI_TEMPERATURA=$(TEMPERATURA) \
+                  -v "$(CURDIR)/output:/app/output"
+  DOCKER_RUN_TTY := docker run --rm -it --dns 8.8.8.8 --env-file .env \
+                      -e PYTHONUTF8=1 \
+                      -e PYTHONPATH=/app/src \
+                      -v "$(CURDIR)/output:/app/output"
+  OUTFILE_MOUNT :=
+  PY := $(DOCKER_RUN) $(IMAGE) python
+  PYT := $(DOCKER_RUN_TTY) $(IMAGE) python
+else
+  MODE := native
+  # Entorno nativo: UTF-8 + src/ en el path de importación
+  NATIVE_ENV := PYTHONUTF8=1 PYTHONIOENCODING=utf-8 PYTHONPATH=src
+  PY := $(NATIVE_ENV) python
+  PYT := $(NATIVE_ENV) python
+endif
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────────
 
-## Muestra esta ayuda
 help:
 	@echo ""
-	@echo "  ╔══════════════════════════════════════════════════════════╗"
-	@echo "  ║   PIPELINE DE ANÁLISIS FINANCIERO INTELIGENTE            ║"
-	@echo "  ╠══════════════════════════════════════════════════════════╣"
-	@echo "  ║  make build      → construir imagen Docker               ║"
-	@echo "  ║  make snapshot   → extraer datos de Wallet               ║"
-	@echo "  ║  make analyze    → diagnóstico financiero con Gemini     ║"
-	@echo "  ║  make learn      → aprender reglas contables             ║"
-	@echo "  ║  make enrich     → enriquecer notas y etiquetas          ║"
-	@echo "  ║  make confirm    → confirmar/modificar reglas            ║"
-	@echo "  ║  make pipeline   → snapshot + analyze  (estándar)        ║"
-	@echo "  ║  make full       → pipeline completo + learn + enrich    ║"
-	@echo "  ║  make historial  → historial de snapshots                ║"
-	@echo "  ║  make reglas     → reglas aprendidas                     ║"
-	@echo "  ║  make logs       → último log del pipeline               ║"
-	@echo "  ║  make clean      → borrar logs y archivos temporales     ║"
-	@echo "  ╚══════════════════════════════════════════════════════════╝"
+	@echo "  PIPELINE DE ANALISIS FINANCIERO INTELIGENTE  (modo: $(MODE))"
+	@echo "  ============================================================"
+	@echo "  make doctor       -> comprueba entorno (python/docker/.env)"
+	@echo "  make build        -> construye la imagen Docker"
+	@echo "  make snapshot     -> extrae datos de Wallet"
+	@echo "  make analyze      -> diagnostico financiero con Gemini"
+	@echo "  make learn        -> aprender reglas contables"
+	@echo "  make enrich       -> enriquecer notas y etiquetas"
+	@echo "  make confirm      -> confirmar/modificar reglas (interactivo)"
+	@echo "  make dashboard    -> genera dashboard HTML"
+	@echo "  make pipeline     -> snapshot + analyze"
+	@echo "  make full         -> snapshot + analyze + learn + enrich"
+	@echo "  make reconcile    -> concilia cuenta con un plan JSON"
+	@echo "  make ajustar      -> ajusta initialBalance (partida de apertura)"
+	@echo "  make historial    -> historial de snapshots"
+	@echo "  make reglas       -> reglas aprendidas"
+	@echo "  make logs         -> ultimo log del pipeline"
+	@echo "  make test         -> ejecuta la suite de tests"
+	@echo "  make clean        -> borra logs y archivos temporales"
 	@echo ""
-	@echo "  Variables: DAYS=90 LIMIT=200 TEMPERATURA=0.3"
-	@echo "  Ejemplo:   make pipeline DAYS=30"
+	@echo "  Variables: DAYS=90 LIMIT=0 TEMPERATURA=0.3"
+	@echo "  DAYS=0  -> historico completo   LIMIT=0 -> sin tope de registros"
+	@echo ""
+	@echo "  Sin make (Windows): .\\scripts\\budget.ps1 help"
 	@echo ""
 
-## Construir imagen Docker
+## Comprueba el entorno disponible
+doctor:
+	@echo "Modo            : $(MODE)"
+	@echo "Docker          : $(DOCKER_OK)"
+	@command -v python >/dev/null 2>&1 && python --version || echo "python        : NO ENCONTRADO"
+	@test -f .env && echo ".env            : presente" || echo ".env            : FALTA"
+	@test -f output/snapshot_wallet.json && echo "snapshot        : presente" || echo "snapshot        : sin snapshot"
+
 build:
 	docker build -t $(IMAGE) .
 
-## Extraer snapshot de Wallet API
+## Extrae snapshot de Wallet (DAYS=0 -> historico completo)
 snapshot:
-	$(DOCKER_RUN) $(IMAGE) python src/gestor_snapshots.py \
-	  --days $(DAYS) --limit $(LIMIT)
+	$(PY) -m gestor_snapshots --days $(DAYS) --limit $(LIMIT)
 
-## Generar diagnóstico financiero con Gemini
 analyze:
-	$(DOCKER_RUN) $(IMAGE) python src/analizador_finanzas.py
+	$(PY) -m analizador_finanzas
 
-## Aprender reglas contables desde el snapshot
 learn:
-	$(DOCKER_RUN) $(IMAGE) python src/aprendizaje_reglas.py \
-	  --max-registros $(MAX_REG) --temperatura $(TEMPERATURA)
+	$(PY) -m aprendizaje_reglas --max-registros $(MAX_REG) --temperatura $(TEMPERATURA)
 
-## Enriquecer notas, etiquetas y categorías (modo automático)
 enrich:
-	$(DOCKER_RUN) $(IMAGE) python src/asistente_enriquecimiento.py --auto
+	$(PY) -m asistente_enriquecimiento --auto
 
-## Confirmar/rechazar/modificar reglas (interactivo, requiere TTY)
 confirm:
-	$(DOCKER_RUN_TTY) -e PYTHONPATH=/app/src $(IMAGE) python src/confirmador_reglas.py
+	$(PYT) -m confirmador_reglas
 
-## Pipeline estándar: snapshot + analyze
 pipeline:
-	$(DOCKER_RUN) \
-	  -v $(CURDIR)/run_pipeline.py:/app/run_pipeline.py \
-	  $(IMAGE) python run_pipeline.py
+	$(PY) -m run_pipeline
 
-## Pipeline completo: snapshot + analyze + learn + enrich
 full:
-	$(DOCKER_RUN) \
-	  -v $(CURDIR)/run_pipeline.py:/app/run_pipeline.py \
-	  $(IMAGE) python run_pipeline.py --full
+	$(PY) -m run_pipeline --full
 
-## Generar dashboard HTML desde los JSONs de output/
 dashboard:
-	$(DOCKER_RUN) $(IMAGE) python src/generar_dashboard.py
+	$(PY) -m generar_dashboard
 
-## Mostrar historial de snapshots
+## Concilia una cuenta con un plan JSON (no toca initialBalance)
+## Uso: make reconcile PLAN=plan.json [DRY=1] [YES=1]
+reconcile:
+	@if [ -z "$(PLAN)" ]; then \
+		echo "Uso: make reconcile PLAN=plan.json [DRY=1] [YES=1]"; exit 1; fi
+	$(PYT) -m conciliar_cuenta --plan "$(PLAN)" \
+		$(if $(DRY),--dry-run) $(if $(YES),--yes)
+
+## Ajusta initialBalance como partida de apertura (exige delta + explicacion)
+## Uso: make ajustar CUENTA=Pibank INITIAL=2580398.47 DELTA=2580400.24 \
+##                  EXPLICACION="Residual de apertura pre-ventana" [DRY=1]
+ajustar:
+	@if [ -z "$(CUENTA)" ] || [ -z "$(INITIAL)" ] || [ -z "$(EXPLICACION)" ]; then \
+		echo "Uso: make ajustar CUENTA=X INITIAL=N DELTA=N EXPLICACION='texto' [DRY=1]"; exit 1; fi
+	$(PYT) -m ajustar_saldo_cuenta \
+		--cuenta "$(CUENTA)" \
+		--initial-balance "$(INITIAL)" \
+		$(if $(DELTA),--delta "$(DELTA)") \
+		--explicacion "$(EXPLICACION)" \
+		$(if $(DRY),--dry-run)
+
 historial:
-	$(DOCKER_RUN) $(IMAGE) python src/gestor_snapshots.py --historial
+	$(PY) -m gestor_snapshots --historial
 
-## Mostrar reglas aprendidas
 reglas:
-	$(DOCKER_RUN) $(IMAGE) python src/aprendizaje_reglas.py --mostrar-reglas
+	$(PY) -m aprendizaje_reglas --mostrar-reglas
 
-## Mostrar el log del último pipeline ejecutado
 logs:
 	@LAST=$$(ls -t output/logs/pipeline_*.log 2>/dev/null | head -1); \
-	if [ -z "$$LAST" ]; then \
-	  echo "No hay logs disponibles todavía."; \
-	else \
-	  echo "=== $$LAST ==="; cat "$$LAST"; \
-	fi
+	if [ -z "$$LAST" ]; then echo "No hay logs todavia."; \
+	else echo "=== $$LAST ==="; cat "$$LAST"; fi
 
-## Borrar logs y archivos temporales
+test:
+	$(PY) -m pytest tests -q
+
 clean:
 	@echo "Limpiando logs..."
 	@rm -f output/logs/pipeline_*.log output/logs/pipeline_*_resumen.json

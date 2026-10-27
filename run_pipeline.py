@@ -62,8 +62,9 @@ PASOS = {
     "snapshot": {
         "nombre":      "Extracción de Snapshot",
         "script":      "src/gestor_snapshots.py",
+        # RECORDS_LIMIT=0 -> sin tope: se pagina completo y luego se trunca
         "args_env":    ["--days", os.getenv("DAYS_BACK", "90"),
-                        "--limit", os.getenv("RECORDS_LIMIT", "200")],
+                        "--limit", os.getenv("RECORDS_LIMIT", "0") or "0"],
         "interactivo": False,
         "en_standard": True,
         "en_full":     True,

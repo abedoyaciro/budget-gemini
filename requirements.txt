@@ -3,3 +3,6 @@ python-dotenv
 requests
 pydantic
 pytz
+
+# Tests (make test / .\scripts\budget.ps1 test)
+pytest

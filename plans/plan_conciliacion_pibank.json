@@ -1,0 +1,49 @@
+{
+  "version": "plan.conciliacion.v1",
+  "cuenta": "Pibank",
+  "banco": "Pibank",
+  "moneda": "COP",
+  "tolerancia": 0.01,
+  "since_date": "2026-03-01T00:00:00Z",
+  "captura": {
+    "fecha": "2026-10-26",
+    "saldo_final": 2580398.47,
+    "saldo_corrido": [
+      { "fecha": "2026-04-01", "saldo": 426872.26 },
+      { "fecha": "2026-04-28", "saldo": 1091872.26 },
+      { "fecha": "2026-05-01", "saldo": 1096122.38 },
+      { "fecha": "2026-06-01", "saldo": 1105879.60 },
+      { "fecha": "2026-07-01", "saldo": 1115406.12 },
+      { "fecha": "2026-07-06", "saldo": 2515406.12 },
+      { "fecha": "2026-08-01", "saldo": 2535787.16 },
+      { "fecha": "2026-09-01", "saldo": 2558359.66 },
+      { "fecha": "2026-10-01", "saldo": 2580398.47 }
+    ],
+    "movimientos": [
+      { "fecha": "2026-04-01", "monto": 2115.55, "concepto": "Intereses", "category_system_id": "income__interest_dividends", "saldo_corrido": 426872.26 },
+      { "fecha": "2026-04-28", "monto": 665000.00, "concepto": "Pago Interbancario", "saldo_corrido": 1091872.26 },
+      { "fecha": "2026-05-01", "monto": 4250.12, "concepto": "Intereses", "category_system_id": "income__interest_dividends", "saldo_corrido": 1096122.38 },
+      { "fecha": "2026-06-01", "monto": 9757.22, "concepto": "Intereses", "category_system_id": "income__interest_dividends", "saldo_corrido": 1105879.60 },
+      { "fecha": "2026-07-01", "monto": 9526.52, "concepto": "Intereses", "category_system_id": "income__interest_dividends", "saldo_corrido": 1115406.12 },
+      { "fecha": "2026-07-06", "monto": 1400000.00, "concepto": "Pago Interbancario", "saldo_corrido": 2515406.12 },
+      { "fecha": "2026-08-01", "monto": 20381.04, "concepto": "Intereses", "category_system_id": "income__interest_dividends", "saldo_corrido": 2535787.16 },
+      { "fecha": "2026-09-01", "monto": 22572.50, "concepto": "Intereses", "category_system_id": "income__interest_dividends", "saldo_corrido": 2558359.66 },
+      { "fecha": "2026-10-01", "monto": 22038.81, "concepto": "Intereses", "category_system_id": "income__interest_dividends", "saldo_corrido": 2580398.47 }
+    ]
+  },
+  "crear_registros": [
+    { "fecha": "2026-04-01", "monto": 2115.55, "concepto": "Intereses", "category_system_id": "income__interest_dividends" },
+    { "fecha": "2026-04-28", "monto": 665000.00, "concepto": "Pago Interbancario" },
+    { "fecha": "2026-05-01", "monto": 4250.12, "concepto": "Intereses", "category_system_id": "income__interest_dividends" },
+    { "fecha": "2026-06-01", "monto": 9757.22, "concepto": "Intereses", "category_system_id": "income__interest_dividends" },
+    { "fecha": "2026-07-01", "monto": 9526.52, "concepto": "Intereses", "category_system_id": "income__interest_dividends" },
+    { "fecha": "2026-07-06", "monto": 1400000.00, "concepto": "Pago Interbancario" },
+    { "fecha": "2026-08-01", "monto": 20381.04, "concepto": "Intereses", "category_system_id": "income__interest_dividends" },
+    { "fecha": "2026-09-01", "monto": 22572.50, "concepto": "Intereses", "category_system_id": "income__interest_dividends" },
+    { "fecha": "2026-10-01", "monto": 22038.81, "concepto": "Intereses", "category_system_id": "income__interest_dividends" }
+  ],
+  "transferencias": [
+    { "fecha": "2026-07-06", "monto": 1400000.00, "concepto": "Pago Interbancario", "cuenta_contraparte": "Lulo", "crear_espejo": false },
+    { "fecha": "2026-04-28", "monto": 665000.00, "concepto": "Pago Interbancario", "cuenta_contraparte": "Lulo", "crear_espejo": false }
+  ]
+}
